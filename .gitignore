@@ -1,0 +1,11 @@
+.env
+.dev-certs/
+*.pem
+*.key
+bin/
+.tmp-api/
+.tmp-worker/
+coverage/
+web/dist/
+web/node_modules/
+e2e-artifacts/

@@ -1,0 +1,73 @@
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --house-accent-base: #3DE0F0;
+  --house-accent-ink: #15170e;
+  --house-bg-canvas: oklch(0.178 0.008 250);
+  --house-bg-sunken: oklch(0.152 0.008 250);
+  --house-bg-surface: oklch(0.212 0.009 250);
+  --house-bg-raised: oklch(0.252 0.010 250);
+  --house-rule-subtle: oklch(0.298 0.010 250);
+  --house-rule-strong: oklch(0.392 0.012 250);
+  --house-text-primary: oklch(0.955 0.005 250);
+  --house-text-secondary: oklch(0.822 0.007 250);
+  --house-text-tertiary: oklch(0.668 0.009 250);
+  --house-status-ok: oklch(0.80 0.14 152);
+  --house-status-warning: oklch(0.83 0.15 78);
+  --house-status-danger: oklch(0.72 0.16 26);
+  --house-status-info: oklch(0.80 0.08 235);
+  --house-status-ok-bg: color-mix(in oklab, var(--house-status-ok) 12%, var(--house-bg-canvas));
+  --house-status-warning-bg: color-mix(in oklab, var(--house-status-warning) 12%, var(--house-bg-canvas));
+  --house-status-danger-bg: color-mix(in oklab, var(--house-status-danger) 12%, var(--house-bg-canvas));
+  --house-status-info-bg: color-mix(in oklab, var(--house-status-info) 10%, var(--house-bg-canvas));
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --house-bg-canvas: oklch(0.985 0.003 250);
+  --house-bg-sunken: oklch(0.952 0.004 250);
+  --house-bg-surface: oklch(1 0 0);
+  --house-bg-raised: oklch(0.938 0.005 250);
+  --house-rule-subtle: oklch(0.882 0.006 250);
+  --house-rule-strong: oklch(0.782 0.010 250);
+  --house-text-primary: oklch(0.215 0.012 250);
+  --house-text-secondary: oklch(0.405 0.012 250);
+  --house-text-tertiary: oklch(0.538 0.012 250);
+  --house-status-ok: oklch(0.48 0.13 152);
+  --house-status-warning: oklch(0.52 0.13 68);
+  --house-status-danger: oklch(0.50 0.18 26);
+  --house-status-info: oklch(0.45 0.09 235);
+  --house-status-ok-bg: color-mix(in oklab, var(--house-status-ok) 9%, var(--house-bg-canvas));
+  --house-status-warning-bg: color-mix(in oklab, var(--house-status-warning) 9%, var(--house-bg-canvas));
+  --house-status-danger-bg: color-mix(in oklab, var(--house-status-danger) 8%, var(--house-bg-canvas));
+  --house-status-info-bg: color-mix(in oklab, var(--house-status-info) 8%, var(--house-bg-canvas));
+}
+:root {
+  --house-accent: var(--house-accent-base);
+  --house-selected-bg: color-mix(in oklab, var(--house-accent-base) 11%, var(--house-bg-canvas));
+  --house-font-product: "Archivo", sans-serif;
+  --house-font-editorial: "Newsreader", serif;
+  --house-font-technical: "IBM Plex Mono", monospace;
+  --house-type-display: 48px;
+  --house-type-page-title: 30px;
+  --house-type-section: 15px;
+  --house-type-lede: 14px;
+  --house-type-body: 14px;
+  --house-type-eyebrow: 10px;
+  --house-leading-title: 1.12;
+  --house-leading-body: 1.6;
+  --house-control-height: 34px;
+  --house-row-height: 40px;
+  --house-page-gutter: 28px;
+  --house-nav-width: 218px;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--house-bg-canvas); }
+body { margin: 0; min-height: 100svh; background: var(--house-bg-canvas); color: var(--house-text-primary); font: 400 var(--house-type-body)/var(--house-leading-body) var(--house-font-product); -webkit-font-smoothing: antialiased; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--house-accent); outline-offset: 2px; }
+@media (max-width: 720px) {
+  :root { --house-type-display: 32px; --house-type-page-title: 22px; --house-control-height: 44px; --house-row-height: 48px; --house-page-gutter: 16px; --house-nav-width: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}

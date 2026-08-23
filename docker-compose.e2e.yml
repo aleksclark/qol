@@ -1,0 +1,37 @@
+services:
+  nats:
+    image: nats:2.12-alpine
+    command: ["-js", "-sd", "/data"]
+    tmpfs:
+      - /data
+  qol-api:
+    build:
+      context: .
+      dockerfile: docker/go.Dockerfile
+      args:
+        COMMAND: qol-api
+    command: ["serve", "--nats-url", "nats://nats:4222", "--allowed-origin", "http://web"]
+    depends_on:
+      - nats
+  qol-worker:
+    build:
+      context: .
+      dockerfile: docker/go.Dockerfile
+      args:
+        COMMAND: qol-worker
+    command: ["run", "--nats-url", "nats://nats:4222"]
+    deploy:
+      replicas: 2
+    depends_on:
+      - nats
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    depends_on:
+      - qol-api
+  e2e:
+    image: busybox:1.37
+    command: ["sh", "-c", "until wget -q -O /dev/null http://qol-api:8080/healthz; do sleep 1; done; until wget -q -O /dev/null http://web; do sleep 1; done"]
+    depends_on:
+      - web

@@ -1,0 +1,85 @@
+version: "3"
+
+vars:
+  DEV_COMPOSE: docker compose -f docker-compose.dev.yml --env-file .dev-certs/compose.env
+  ADMIN_USERNAME: '{{default "admin" .QOL_ADMIN_USERNAME}}'
+  ADMIN_PASSWORD: '{{default "change-me" .QOL_ADMIN_PASSWORD}}'
+
+tasks:
+  generate:
+    cmds:
+      - buf generate
+
+  test:
+    cmds:
+      - go test ./...
+
+  lint:
+    cmds:
+      - buf lint
+      - go vet ./...
+
+  build:
+    cmds:
+      - go build ./cmd/...
+
+  web-install:
+    cmds:
+      - npm --prefix web install
+
+  web-test:
+    cmds:
+      - npm --prefix web test -- --run
+
+  web-build:
+    cmds:
+      - npm --prefix web run build
+
+  dev:
+    desc: Start the development stack and provision the administrator
+    cmds:
+      - |
+        mkdir -p .dev-certs
+        if [ ! -s .dev-certs/localhost.pem ] || \
+          ! openssl x509 -in .dev-certs/localhost.pem -noout -text 2>/dev/null | grep -q 'id-ecPublicKey'; then
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 10 \
+            -subj '/CN=localhost' \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' \
+            -keyout .dev-certs/localhost-key.pem \
+            -out .dev-certs/localhost.pem >/dev/null 2>&1
+        fi
+        cert_hash=$(openssl x509 -in .dev-certs/localhost.pem -outform DER | openssl dgst -sha256 -binary | openssl base64 -A)
+        printf 'VITE_WEBTRANSPORT_CERT_HASH=%s\n' "$cert_hash" > .dev-certs/compose.env
+      - '{{.DEV_COMPOSE}} up --remove-orphans --build --detach --scale qol-worker=2'
+      - |
+        attempts=0
+        until {{.DEV_COMPOSE}} exec -T qol-api wget -q -O /dev/null http://localhost:8080/healthz >/dev/null 2>&1; do
+          attempts=$((attempts + 1))
+          if [ "$attempts" -ge 60 ]; then
+            {{.DEV_COMPOSE}} ps -a
+            {{.DEV_COMPOSE}} logs --no-color --tail=100 qol-api qol-worker
+            exit 1
+          fi
+          sleep 1
+        done
+      - |
+        output=$({{.DEV_COMPOSE}} exec -T \
+          -e QOL_USERNAME='{{.ADMIN_USERNAME}}' \
+          -e QOL_PASSWORD='{{.ADMIN_PASSWORD}}' \
+          qol-api go run ./cmd/qol-api admin bootstrap --nats-url nats://nats:4222 2>&1) || {
+          case "$output" in
+            *"record already exists"*) ;;
+            *) printf '%s\n' "$output" >&2; exit 1 ;;
+          esac
+        }
+      - |
+        web_port=$({{.DEV_COMPOSE}} port web 5173 | sed 's/.*://')
+        printf '\nQol development stack is ready.\n'
+        printf 'Web:      http://localhost:%s\n' "$web_port"
+        printf 'Username: %s\n' '{{.ADMIN_USERNAME}}'
+        printf 'Password: %s\n\n' '{{.ADMIN_PASSWORD}}'
+
+  dev:down:
+    desc: Stop and remove the development stack
+    cmds:
+      - '{{.DEV_COMPOSE}} down --remove-orphans'

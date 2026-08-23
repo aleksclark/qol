@@ -1,0 +1,8 @@
+root = "."
+tmp_dir = "/tmp/qol-worker"
+[build]
+cmd = "go build -o /tmp/qol-worker/qol-worker ./cmd/qol-worker"
+entrypoint = ["/tmp/qol-worker/qol-worker"]
+args_bin = ["run"]
+include_ext = ["go", "proto"]
+exclude_dir = ["web", "gen"]
