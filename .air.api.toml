@@ -1,0 +1,8 @@
+root = "."
+tmp_dir = "/tmp/qol-api"
+[build]
+cmd = "go build -o /tmp/qol-api/qol-api ./cmd/qol-api"
+entrypoint = ["/tmp/qol-api/qol-api"]
+args_bin = ["serve"]
+include_ext = ["go", "proto"]
+exclude_dir = ["web", "gen"]

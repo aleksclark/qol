@@ -1,0 +1,10 @@
+{
+  "format": "agentbase-house-tokens/v1",
+  "name": "Editorial Instrument",
+  "version": "1.0.0",
+  "theme": { "canonical": "dark", "parity": "light" },
+  "accent": { "allowed": { "violet": "#B98BFF", "cyan": "#3DE0F0", "mint": "#7CFFB2" }, "selected": "#3DE0F0", "ink": "#15170E" },
+  "font": { "product": "Archivo", "editorial": "Newsreader", "technical": "IBM Plex Mono" },
+  "density": { "default": "comfortable", "control": 34, "row": 40, "mobileControl": 44, "mobileRow": 48 },
+  "shape": { "radiusSmall": 2, "radiusMedium": 2, "focusWidth": 2, "focusOffset": 2 }
+}
