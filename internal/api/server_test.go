@@ -36,11 +36,11 @@ func TestNewConfiguresHTTP3ForWebTransport(t *testing.T) {
 	}
 }
 
-func TestTopicActivityListsEveryPipelineSubject(t *testing.T) {
+func TestTopicActivityListsEveryGraphSubject(t *testing.T) {
 	server, token := authenticatedServer(t)
 	server.activity = staticActivity{topics: []eventbus.TopicActivity{
-		{Subject: "qol.pipeline.capture.input", EventCount: 12},
-		{Subject: "qol.pipeline.record-es.completed", EventCount: 3},
+		{Subject: "qol.graph.capture.input", EventCount: 12},
+		{Subject: "qol.graph.record-es.completed", EventCount: 3},
 	}}
 	request := httptest.NewRequest(http.MethodPost, "/v1/topic-activity", nil)
 	request.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
@@ -56,7 +56,7 @@ func TestTopicActivityListsEveryPipelineSubject(t *testing.T) {
 	if len(message.Topics) != 9 {
 		t.Fatalf("got %d topics, want 9", len(message.Topics))
 	}
-	if message.Topics[0].Subject != "qol.pipeline.capture.input" || message.Topics[0].EventCount != 12 {
+	if message.Topics[0].Subject != "qol.graph.capture.input" || message.Topics[0].EventCount != 12 {
 		t.Fatalf("unexpected first topic: %#v", message.Topics[0])
 	}
 	if message.Topics[1].EventCount != 0 || message.Topics[8].EventCount != 3 {

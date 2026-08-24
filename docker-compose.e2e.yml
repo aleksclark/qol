@@ -29,7 +29,7 @@ services:
       dockerfile: docker/go.Dockerfile
       args:
         COMMAND: qol-worker
-    command: ["run", "--type", "record", "--name", "record-en", "--input", "pipeline.record-en.input", "--output", "pipeline.record-en.completed", "--nats-url", "nats://nats:4222", "--output-dir", "/output"]
+    command: ["run", "--type", "record", "--name", "record-en", "--input", "graph.record-en.input", "--output", "graph.record-en.completed", "--nats-url", "nats://nats:4222", "--output-dir", "/output"]
     tmpfs:
       - /output
       - /tmp/qol
@@ -41,7 +41,7 @@ services:
       dockerfile: docker/go.Dockerfile
       args:
         COMMAND: qol-worker
-    command: ["run", "--type", "record", "--name", "record-es", "--input", "pipeline.record-es.input", "--output", "pipeline.record-es.completed", "--nats-url", "nats://nats:4222", "--output-dir", "/output"]
+    command: ["run", "--type", "record", "--name", "record-es", "--input", "graph.record-es.input", "--output", "graph.record-es.completed", "--nats-url", "nats://nats:4222", "--output-dir", "/output"]
     tmpfs:
       - /output
       - /tmp/qol

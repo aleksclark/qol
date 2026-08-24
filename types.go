@@ -1,15 +1,15 @@
 package qol
 
 const (
-	ChannelCaptureInput      = "pipeline.capture.input"
-	ChannelCaptureOutput     = "pipeline.capture.output"
-	ChannelAudioInput        = "pipeline.stt-whisper.input"
-	ChannelRecordENInput     = "pipeline.record-en.input"
-	ChannelASRText           = "pipeline.translate.input"
-	ChannelTranslationText   = "pipeline.tts.input"
-	ChannelTTSAudio          = "pipeline.record-es.input"
-	ChannelRecordENCompleted = "pipeline.record-en.completed"
-	ChannelRecordESCompleted = "pipeline.record-es.completed"
+	ChannelCaptureInput      = "graph.capture.input"
+	ChannelCaptureOutput     = "graph.capture.output"
+	ChannelAudioInput        = "graph.stt-whisper.input"
+	ChannelRecordENInput     = "graph.record-en.input"
+	ChannelASRText           = "graph.translate.input"
+	ChannelTranslationText   = "graph.tts.input"
+	ChannelTTSAudio          = "graph.record-es.input"
+	ChannelRecordENCompleted = "graph.record-en.completed"
+	ChannelRecordESCompleted = "graph.record-es.completed"
 )
 
 const (

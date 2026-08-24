@@ -25,7 +25,7 @@ func main() {
 func newCommand() *cobra.Command {
 	command := &cobra.Command{Use: "qol-worker", Short: "Qol event worker"}
 	command.PersistentFlags().String("nats-url", nats.DefaultURL, "NATS server URL")
-	runCommand := &cobra.Command{Use: "run", Short: "Run one streaming pipeline stage", RunE: run}
+	runCommand := &cobra.Command{Use: "run", Short: "Run one streaming graph stage", RunE: run}
 	runCommand.Flags().String("type", "", "Stage type: capture, stt-whisper, translate, tts, or record")
 	runCommand.Flags().String("stage", "", "Deprecated alias for --type")
 	runCommand.Flags().String("name", "", "Stage instance name; defaults to the type")
@@ -33,7 +33,7 @@ func newCommand() *cobra.Command {
 	runCommand.Flags().String("output", "", "Output channel override")
 	runCommand.Flags().String("processor", "", "Streaming processor executable")
 	runCommand.Flags().StringSlice("processor-arg", nil, "Streaming processor argument")
-	runCommand.Flags().String("spool-dir", "/tmp/qol", "Pipeline spool directory")
+	runCommand.Flags().String("spool-dir", "/tmp/qol", "Graph spool directory")
 	runCommand.Flags().String("output-dir", "/output", "Ogg/Opus output directory")
 	runCommand.Flags().String("ffmpeg", "ffmpeg", "ffmpeg executable")
 	command.AddCommand(runCommand)

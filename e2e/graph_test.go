@@ -55,9 +55,9 @@ func (s *subscription) Close() error          { s.once.Do(func() { close(s.done)
 func (s *subscription) Done() <-chan struct{} { return s.done }
 func (s *subscription) Err() error            { return nil }
 
-func TestRealEnglishToSpanishAudioPipeline(t *testing.T) {
-	if os.Getenv("QOL_RUN_REAL_PIPELINE_E2E") == "" {
-		t.Skip("set QOL_RUN_REAL_PIPELINE_E2E=1 to run local speech models")
+func TestRealEnglishToSpanishAudioGraph(t *testing.T) {
+	if os.Getenv("QOL_RUN_REAL_GRAPH_E2E") == "" {
+		t.Skip("set QOL_RUN_REAL_GRAPH_E2E=1 to run local speech models")
 	}
 	root, err := filepath.Abs("..")
 	if err != nil {

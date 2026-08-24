@@ -112,7 +112,7 @@ func (s *Server) topicActivity(writer http.ResponseWriter, request *http.Request
 	}
 	activity, err := s.activity.TopicActivity()
 	if err != nil {
-		writeError(writer, http.StatusServiceUnavailable, "activity_unavailable", "Could not inspect pipeline activity")
+		writeError(writer, http.StatusServiceUnavailable, "activity_unavailable", "Could not inspect graph activity")
 		return
 	}
 	counts := make(map[string]uint64, len(activity))
@@ -120,7 +120,7 @@ func (s *Server) topicActivity(writer http.ResponseWriter, request *http.Request
 		counts[topic.Subject] = topic.EventCount
 	}
 	response := &qolv1.TopicActivityResponse{ObservedAtUnixMilli: time.Now().UnixMilli()}
-	for _, channel := range pipelineChannels() {
+	for _, channel := range graphChannels() {
 		subject := "qol." + channel
 		response.Topics = append(response.Topics, &qolv1.TopicActivity{Subject: subject, EventCount: counts[subject]})
 	}
@@ -253,8 +253,8 @@ func (s *Server) serveSession(session *webtransport.Session) {
 			}
 			paths[event.Channel] = stored.Path
 		case <-deadline:
-			closeMsg = "pipeline_timeout"
-			_ = wire.WriteFrame(stream, serverError("pipeline_timeout", "The pipeline did not complete in time"))
+			closeMsg = "graph_timeout"
+			_ = wire.WriteFrame(stream, serverError("graph_timeout", "The graph did not complete in time"))
 			return
 		case <-session.Context().Done():
 			closeMsg = "session_canceled"
@@ -332,7 +332,7 @@ func serverError(code, message string) *qolv1.ServerFrame {
 	return &qolv1.ServerFrame{Body: &qolv1.ServerFrame_Error{Error: &qolv1.Error{Code: code, Message: message}}}
 }
 
-func pipelineChannels() []string {
+func graphChannels() []string {
 	return []string{
 		qol.ChannelCaptureInput,
 		qol.ChannelCaptureOutput,

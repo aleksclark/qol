@@ -10,7 +10,7 @@ Qol is a streaming voice translation system with a Go control plane and stage wo
 - Web typecheck: `npm --prefix web run typecheck`
 - Protobuf lint/generation: `buf lint && buf generate`
 - Development stack: run `task dev`. Dedicated worker images contain their processor dependencies and models.
-- Stop development: `task dev:down`; API data and the pipeline spool persist. Recorded Ogg/Opus files land in gitignored `tmp/`.
+- Stop development: `task dev:down`; API data and the graph spool persist. Recorded Ogg/Opus files land in gitignored `tmp/`.
 
 Full local gate:
 
@@ -42,17 +42,17 @@ The Compose e2e service is startup-only. It does not run model inference or the 
 - `internal/auth` and `internal/store`: users, sessions, one-use upload tickets, and memory/disk adapters.
 - `proto/qol/v1`: source wire schema. Generated Go is in `gen/qol/v1`; generated browser code is in `web/src/gen/qol/v1`.
 
-Pipeline subjects are fixed:
+Graph subjects are fixed:
 
-1. `qol.pipeline.capture.input`: source audio chunks from the API.
-2. `qol.pipeline.capture.output`: canonical capture fan-out copy.
-3. `qol.pipeline.stt-whisper.input`: source audio for STT.
-4. `qol.pipeline.record-en.input`: source audio for the English record instance.
-5. `qol.pipeline.translate.input`: UTF-8 English text chunks.
-6. `qol.pipeline.tts.input`: UTF-8 Spanish text chunks.
-7. `qol.pipeline.record-es.input`: Spanish S16LE PCM chunks.
-8. `qol.pipeline.record-en.completed`: English Ogg/Opus metadata.
-9. `qol.pipeline.record-es.completed`: Spanish Ogg/Opus metadata.
+1. `qol.graph.capture.input`: source audio chunks from the API.
+2. `qol.graph.capture.output`: canonical capture fan-out copy.
+3. `qol.graph.stt-whisper.input`: source audio for STT.
+4. `qol.graph.record-en.input`: source audio for the English record instance.
+5. `qol.graph.translate.input`: UTF-8 English text chunks.
+6. `qol.graph.tts.input`: UTF-8 Spanish text chunks.
+7. `qol.graph.record-es.input`: Spanish S16LE PCM chunks.
+8. `qol.graph.record-en.completed`: English Ogg/Opus metadata.
+9. `qol.graph.record-es.completed`: Spanish Ogg/Opus metadata.
 
 Capture publishes each incoming audio-stream event onto the three capture output ports. STT and `record-en` subscribe to their own input subjects.
 
