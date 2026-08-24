@@ -11,29 +11,74 @@ message MediaSpan {
   int64 end_ns = 2;
 }
 
-enum PcmSampleFormat {
-  PCM_SAMPLE_FORMAT_UNSPECIFIED = 0;
-  PCM_SAMPLE_FORMAT_S16_LE = 1;
-}
-
-message PcmChunk {
-  uint32 sample_rate_hz = 1;
-  uint32 channel_count = 2;
-  PcmSampleFormat sample_format = 3;
-  uint32 frame_count = 4;
-  bytes interleaved_samples = 5;
-}
-
 message Event {
   string event_id = 1;
   string session_id = 2;
-  uint64 sequence = 3;
-  MediaSpan span = 4;
-  repeated string parent_event_ids = 5;
-  google.protobuf.Timestamp produced_at = 6;
-  oneof payload {
-    PcmChunk pcm = 10;
-  }
+  string channel = 3;
+  string type = 4;
+  uint64 sequence = 5;
+  MediaSpan span = 6;
+  repeated string parent_event_ids = 7;
+  google.protobuf.Timestamp produced_at = 8;
+  string encoding = 9;
+  bytes payload = 10;
+}
+
+enum PcmSampleFormat {
+  PCM_SAMPLE_FORMAT_UNSPECIFIED = 0;
+  PCM_SAMPLE_FORMAT_S16_LE = 1;
+  PCM_SAMPLE_FORMAT_F32_LE = 2;
+}
+
+message PcmFormat {
+  uint32 sample_rate_hz = 1;
+  uint32 channel_count = 2;
+  PcmSampleFormat sample_format = 3;
+}
+
+message AudioPayload {
+  PcmFormat format = 1;
+  bytes data = 2;
+}
+
+message TextPayload {
+  string text = 1;
+  bool final = 2;
+  string language = 3;
+  string speaker = 4;
+  float confidence = 5;
+}
+
+message ProsodyPayload {
+  float pitch_hz = 1;
+  float energy = 2;
+  float rate = 3;
+  float emphasis = 4;
+}
+
+message SpeakerPayload {
+  string id = 1;
+  float confidence = 2;
+}
+
+message TranslationPayload {
+  string text = 1;
+  string source_language = 2;
+  string target_language = 3;
+  bool final = 4;
+}
+
+message StoredAudioPayload {
+  string media_type = 1;
+  string path = 2;
+  uint64 size_bytes = 3;
+}
+
+message AudioStreamPayload {
+  string media_type = 1;
+  string name = 2;
+  bool end_of_stream = 3;
+  bytes data = 4;
 }
 
 message LoginRequest {
@@ -63,12 +108,25 @@ message CreateUploadTicketResponse {
   int64 expires_at_unix = 2;
 }
 
+message TopicActivityRequest {}
+
+message TopicActivity {
+  string subject = 1;
+  uint64 event_count = 2;
+}
+
+message TopicActivityResponse {
+  repeated TopicActivity topics = 1;
+  int64 observed_at_unix_milli = 2;
+}
+
 message StartUpload {
   string name = 1;
   uint64 size_bytes = 2;
+  string media_type = 3;
 }
 
-message Mp3Chunk {
+message AudioChunk {
   uint64 sequence = 1;
   bytes data = 2;
   bool end_of_stream = 3;
@@ -79,7 +137,7 @@ message CancelUpload {}
 message ClientFrame {
   oneof body {
     StartUpload start_upload = 1;
-    Mp3Chunk mp3_chunk = 2;
+    AudioChunk audio_chunk = 2;
     CancelUpload cancel_upload = 3;
   }
 }
@@ -89,8 +147,10 @@ message UploadAccepted {
 }
 
 message UploadCompleted {
-  uint64 input_events = 1;
-  uint64 output_events = 2;
+  string session_id = 1;
+  string status = 2;
+  string output_path = 3;
+  repeated string output_paths = 4;
 }
 
 message Error {
@@ -101,9 +161,8 @@ message Error {
 message ServerFrame {
   oneof body {
     UploadAccepted upload_accepted = 1;
-    Event output_event = 2;
-    UploadCompleted upload_completed = 3;
-    Error error = 4;
+    UploadCompleted upload_completed = 2;
+    Error error = 3;
   }
 }
 

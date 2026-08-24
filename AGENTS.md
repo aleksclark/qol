@@ -1,27 +1,18 @@
 # Qol agent guide
 
-Qol is a voice-event processing system with a Go control plane and worker, a React administrator UI, and NATS JetStream as both event transport and KV persistence. Keep wire and persisted representations protobuf-based.
+Qol is a streaming voice translation system with a Go control plane and stage workers, a React administrator UI, and core NATS for event transport. Persistence is a local disk store. Keep all wire and persisted representations protobuf-based.
 
 ## Commands
 
-### Local development
-
-- `task dev` generates a short-lived P-256 localhost certificate, starts the Compose stack, scales `qol-worker` to two replicas, waits for the API, bootstraps the administrator, and prints the dynamically mapped web URL and credentials.
-- Override bootstrap credentials with `QOL_ADMIN_USERNAME` and `QOL_ADMIN_PASSWORD`.
-- `task dev:down` removes the development stack. The `nats-dev` named volume persists unless explicitly removed.
-- The development host ports are API `9875`, web `9876`, and WebTransport UDP `4443`. The UI's browser-facing origins are configured in `docker-compose.dev.yml`.
-
-### Focused verification
-
-- Go package: `go test ./internal/<package>`
+- Focused Go package: `go test ./internal/<package>`
 - All Go tests: `task test` or `go test ./...`
-- Web unit tests: `task web-test` or `npm --prefix web test -- --run`
+- Web tests: `task web-test` or `npm --prefix web test -- --run`
 - Web typecheck: `npm --prefix web run typecheck`
-- Protobuf lint: `buf lint`
+- Protobuf lint/generation: `buf lint && buf generate`
+- Development stack: run `task dev`. Dedicated worker images contain their processor dependencies and models.
+- Stop development: `task dev:down`; API data and the pipeline spool persist. Recorded Ogg/Opus files land in gitignored `tmp/`.
 
-### Full local gate
-
-Run the narrowest relevant test first, then:
+Full local gate:
 
 ```sh
 buf lint
@@ -33,57 +24,62 @@ npm --prefix web ci
 npm --prefix web run typecheck
 npm --prefix web run build
 docker compose -f docker-compose.e2e.yml up --build --abort-on-container-exit --exit-code-from e2e
+docker compose -f docker-compose.e2e.yml down
 ```
 
-The Compose e2e service is currently a startup smoke test: it waits for the API health endpoint and web server, but does not exercise login or audio streaming. Clean it up afterward with `docker compose -f docker-compose.e2e.yml down`.
+The Compose e2e service is startup-only. It does not run model inference or the upload flow. Tool versions are Go `1.26.6`, Task `3.52.0`, and Node `24.15.0` in Docker.
 
-Tool versions are intentionally newer than many system defaults: Go `1.26.6`, Task `3.52.0`, and the Docker web builds use Node `24.15.0`. Use the lockfile with `npm ci` for reproducible verification; `task web-install` and the dev container use `npm install`.
+## Architecture and data flow
 
-## Architecture and flow
+- `cmd/qol-api`: Cobra entrypoint, NATS wiring, disk persistence, HTTP/HTTP3 lifecycle, and admin bootstrap.
+- `cmd/qol-worker`: composition root for one stage selected by `--type=capture|stt-whisper|translate|tts|record`. `--name`, `--input`, and `--output` distinguish record instances.
+- `cmd/qol-feed`: CLI that logs in, takes an upload ticket, and streams a file through WebTransport at playback rate like a live microphone.
+- Root package (`core.go`, `payloads.go`, `types.go`): transport-independent generic event, bus, stage, port, replay, and semantic payload contracts.
+- `internal/api`: protobuf HTTP auth and WebTransport upload. It publishes uploaded chunks to the capture subject and waits for both record completion events.
+- `internal/worker`: `qol.Stage` implementations, stream aggregation behind the generic bus boundary, subprocess `io.Reader`/`io.Writer` adapters, and atomic Ogg/Opus storage.
+- `internal/eventbus`: core NATS publish/subscribe, queue groups, and protobuf serialization.
+- `internal/wire`: the only domain/protobuf conversion layer plus varint-delimited framing.
+- `internal/auth` and `internal/store`: users, sessions, one-use upload tickets, and memory/disk adapters.
+- `proto/qol/v1`: source wire schema. Generated Go is in `gen/qol/v1`; generated browser code is in `web/src/gen/qol/v1`.
 
-- `cmd/qol-api`: Cobra entrypoint, NATS/KV dependency wiring, HTTP and HTTP/3 lifecycle, and admin bootstrap.
-- `cmd/qol-worker`: Cobra entrypoint that attaches the durable echo consumer.
-- `domain`: transport-independent event and PCM types plus narrow interfaces such as `Publisher`.
-- `internal/api`: protobuf-over-HTTP authentication endpoints and the WebTransport upload session.
-- `internal/auth`: account, cookie-session, and one-use upload-ticket behavior over the abstract store.
-- `internal/store`: storage contract; `memory` is the test implementation and `natskv` is production.
-- `internal/eventbus`: JetStream setup, protobuf event serialization, subjects, durable consumers, and ack/nak behavior.
-- `internal/media`: the ffmpeg subprocess adapter.
-- `internal/wire`: the only domain/protobuf conversion layer and length-delimited stream framing.
-- `proto/qol/v1`: source-of-truth wire and persisted record schema. Go output is under `gen/qol/v1`; browser output is under `web/src/gen/qol/v1`.
-- `web/src/api.ts`: protobuf HTTP client. `transport.ts`: WebTransport framing and upload client. `App.tsx`: login and stream console.
+Pipeline subjects are fixed:
 
-The end-to-end data path is:
+1. `qol.pipeline.capture.input`: source audio chunks from the API.
+2. `qol.pipeline.capture.output`: canonical capture fan-out copy.
+3. `qol.pipeline.stt-whisper.input`: source audio for STT.
+4. `qol.pipeline.record-en.input`: source audio for the English record instance.
+5. `qol.pipeline.translate.input`: UTF-8 English text chunks.
+6. `qol.pipeline.tts.input`: UTF-8 Spanish text chunks.
+7. `qol.pipeline.record-es.input`: Spanish S16LE PCM chunks.
+8. `qol.pipeline.record-en.completed`: English Ogg/Opus metadata.
+9. `qol.pipeline.record-es.completed`: Spanish Ogg/Opus metadata.
 
-1. The browser logs in over protobuf HTTP; the API sets an HTTP-only, strict-same-site session cookie.
-2. The browser requests a short-lived, single-use upload ticket because WebTransport setup does not rely on the cookie.
-3. The browser opens `/v1/upload`, sends varint-length-prefixed `ClientFrame` messages, and streams MP3 chunks.
-4. The API runs ffmpeg and emits 16 kHz, mono, signed 16-bit little-endian PCM in 320-frame chunks to `qol.session.<session>.pcm.input`.
-5. Workers queue-consume input events, preserve PCM and sequence/span metadata, link the input as the parent, and publish to `.pcm.output`.
-6. The API subscribes to that session's output subject, suppresses duplicate event IDs, and returns framed output events and completion counts.
+Capture publishes each incoming audio-stream event onto the three capture output ports. STT and `record-en` subscribe to their own input subjects.
 
-## Conventions and invariants
+Every externally visible worker implements `qol.Stage` through `Spec()` and `Run(ctx, bus)`. Stage ports declare channels and accepted/produced semantic event types. Internal processors consume `io.Reader` and produce `io.Writer`; the Ogg/Opus store consumes `io.Reader`. The current runner may spool a stream under `QOL_SPOOL_DIR` behind the Stage/Bus contracts before invoking a processor.
 
-- All commands use Cobra and obtain flags/environment through `config.Bind`. A flag such as `--nats-url` maps to `QOL_NATS_URL`; do not add separate ad hoc environment parsing.
-- Keep business types in `domain` and generated protobuf types at boundaries. Validate domain data in `internal/wire` before publishing or encoding.
-- PCM byte length must equal `frames * channels * 2`. The implemented sample format is only S16LE.
-- Event IDs are deterministic SHA-256 hashes of NUL-separated identity parts. JetStream also uses the ID as `Nats-Msg-Id`, so changing ID derivation changes deduplication semantics.
-- Event subjects follow `qol.session.<session-id>.pcm.{input,output}`. The event stream retains events for 24 hours and deduplicates publications for two minutes.
-- The input subscription is both queue-grouped (`qol-echo`) and durable (`qol-echo-v1`), so the two development workers share work rather than duplicate it. Failed decode/handling is nacked; success is explicitly acked.
-- Store deletion is revision-checked. Preserve this optimistic-concurrency behavior for one-use tickets and sessions.
-- Usernames are trimmed and lowercased. Raw session and upload-ticket secrets are returned only to clients; storage keys are SHA-256 hashes.
-- HTTP payloads, errors, JetStream events, KV records, and WebTransport frames are protobuf. WebTransport frames use unsigned-varint lengths and are capped at 4 MiB.
-- WebTransport requires TLS and an exact allowed-origin match. `task dev` propagates the temporary certificate's SHA-256 hash to the browser because the certificate is self-signed.
+## Invariants and gotchas
+
+- Processor executables read stdin and write stdout. STT streams UTF-8 English lines as utterances finalize, translation emits one Spanish utterance per English event, and TTS emits raw 22050 Hz mono S16LE PCM. Do not provide fake inference fallbacks; missing processor configuration is a startup error.
+- Record instances run ffmpeg with `libopus` and atomically rename a temporary Ogg stream into `QOL_OUTPUT_DIR/<session>-<name>.ogg`. Existing output is treated as a successful retry.
+- Event sequence numbers start at zero and are contiguous per session/channel. `Event.Span` carries source-media alignment independently from wall-clock `ProducedAt`.
+- Event IDs are deterministic SHA-256 hashes of NUL-separated stage/session/sequence identity.
+- Each stage may request a queue group through generic `SubscribeOptions`. The NATS adapter uses core `Subscribe` / `QueueSubscribe`. Durable and replay options are ignored.
+- Local spool state is process-local despite a shared mounted volume. Do not scale a stage horizontally until stream-affinity or shared stream-state coordination is implemented.
+- Store deletion is revision-checked. Preserve optimistic concurrency for tickets and sessions.
+- Usernames are trimmed/lowercased. Session and ticket secrets are returned only to clients; their storage keys are SHA-256 hashes.
+- HTTP payloads, errors, NATS events, disk records, and WebTransport frames are protobuf. Frames are unsigned-varint length-prefixed and capped at 4 MiB.
+- WebTransport requires TLS and an exact origin match. `task dev` propagates the self-signed certificate hash to the browser.
+- Do not use JetStream, durable consumers, or NATS KV.
 
 ## Generated code
 
-Treat `gen/qol/v1/*.pb.go` and `web/src/gen/qol/v1/qol_pb.ts` as generated artifacts, not hand-written implementation. `buf generate` currently configures only local `protoc-gen-go`; there is no checked-in TypeScript generation plugin configuration. After schema changes, verify both generated trees remain synchronized and do not assume `buf generate` updates the browser client.
+Never hand-edit `gen/qol/v1/*.pb.go` or `web/src/gen/qol/v1/qol_pb.ts`. `buf generate` updates Go only. Regenerate TypeScript with `protoc-gen-es` after schema changes and verify both trees are synchronized.
 
 ## Testing patterns
 
-- Go tests use the standard library and small in-memory fakes rather than mocking frameworks. Prefer external test packages where access to internals is unnecessary.
-- Authentication tests use `internal/store/memory`; preserve behavioral parity between it and NATS KV, especially create conflicts and revision-aware deletes.
-- Worker tests inject the narrow `domain.Publisher` interface and assert subjects plus event lineage.
-- Wire tests round-trip domain events and cover validation failures.
-- Web transport tests stub the global `WebTransport` implementation and assert framed messages. Vitest runs in the Node environment, not a real browser.
-- Changes to NATS behavior, ffmpeg integration, TLS/WebTransport negotiation, or the full upload path are not covered by the unit suite; use the development stack for those checks.
+- Go tests use the standard library and small fakes rather than mocking frameworks.
+- Worker tests feed multiple chunks, assert EOS/order, stage subjects, language/media transitions, lineage, deterministic IDs, and stored bytes.
+- Wire tests round-trip every payload and chunk metadata and cover validation failures.
+- Web transport tests stub global `WebTransport`; Vitest runs under Node, not a browser.
+- Unit tests do not cover live NATS redelivery, model executables, ffmpeg encoding, TLS negotiation, or full upload completion. Use the real development stack for those paths.

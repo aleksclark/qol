@@ -1,7 +1,6 @@
 services:
   nats:
     image: nats:2.12-alpine
-    command: ["-js", "-sd", "/data"]
     tmpfs:
       - /data
   qol-api:
@@ -10,18 +9,42 @@ services:
       dockerfile: docker/go.Dockerfile
       args:
         COMMAND: qol-api
-    command: ["serve", "--nats-url", "nats://nats:4222", "--allowed-origin", "http://web"]
+    command: ["serve", "--nats-url", "nats://nats:4222", "--allowed-origin", "http://web", "--data-dir", "/var/lib/qol"]
+    tmpfs:
+      - /var/lib/qol
     depends_on:
       - nats
-  qol-worker:
+  capture:
     build:
       context: .
       dockerfile: docker/go.Dockerfile
       args:
         COMMAND: qol-worker
-    command: ["run", "--nats-url", "nats://nats:4222"]
-    deploy:
-      replicas: 2
+    command: ["run", "--type", "capture", "--nats-url", "nats://nats:4222"]
+    depends_on:
+      - nats
+  record-en:
+    build:
+      context: .
+      dockerfile: docker/go.Dockerfile
+      args:
+        COMMAND: qol-worker
+    command: ["run", "--type", "record", "--name", "record-en", "--input", "pipeline.record-en.input", "--output", "pipeline.record-en.completed", "--nats-url", "nats://nats:4222", "--output-dir", "/output"]
+    tmpfs:
+      - /output
+      - /tmp/qol
+    depends_on:
+      - nats
+  record-es:
+    build:
+      context: .
+      dockerfile: docker/go.Dockerfile
+      args:
+        COMMAND: qol-worker
+    command: ["run", "--type", "record", "--name", "record-es", "--input", "pipeline.record-es.input", "--output", "pipeline.record-es.completed", "--nats-url", "nats://nats:4222", "--output-dir", "/output"]
+    tmpfs:
+      - /output
+      - /tmp/qol
     depends_on:
       - nats
   web:

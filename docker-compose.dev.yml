@@ -1,9 +1,7 @@
 services:
   nats:
     image: nats:2.12-alpine
-    command: ["-js", "-sd", "/data", "-m", "8222"]
-    volumes:
-      - nats-dev:/data
+    command: ["-m", "8222"]
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8222/healthz"]
       interval: 5s
@@ -19,31 +17,119 @@ services:
       QOL_ALLOWED_ORIGIN: http://localhost:9876
       QOL_TLS_CERT: /certs/localhost.pem
       QOL_TLS_KEY: /certs/localhost-key.pem
+      QOL_DATA_DIR: /var/lib/qol
     volumes:
       - .:/app
       - ./.dev-certs:/certs:ro
       - go-cache:/go/pkg/mod
+      - api-data:/var/lib/qol
     ports:
       - "9875:8080"
       - "4443:4443/udp"
     depends_on:
       nats:
         condition: service_started
-  qol-worker:
+  capture:
     build:
       context: .
       dockerfile: docker/go.dev.Dockerfile
     command: ["air", "-c", ".air.worker.toml"]
     environment:
       QOL_NATS_URL: nats://nats:4222
+      QOL_TYPE: capture
     volumes:
       - .:/app
       - go-cache:/go/pkg/mod
-    deploy:
-      replicas: 2
     depends_on:
-      nats:
-        condition: service_started
+      - nats
+  stt-whisper:
+    build:
+      context: .
+      dockerfile: docker/stt-whisper.Dockerfile
+    command: ["air", "-c", ".air.worker.toml"]
+    environment:
+      QOL_NATS_URL: nats://nats:4222
+      QOL_TYPE: stt-whisper
+      QOL_SPOOL_DIR: /spool
+    volumes:
+      - .:/app
+      - ./e2e/processors/stt_whisper.py:/processors/stt_whisper.py
+      - go-cache:/go/pkg/mod
+      - pipeline-spool:/spool
+    depends_on:
+      - nats
+  translate:
+    build:
+      context: .
+      dockerfile: docker/translate.Dockerfile
+    command: ["air", "-c", ".air.worker.toml"]
+    environment:
+      QOL_NATS_URL: nats://nats:4222
+      QOL_TYPE: translate
+      QOL_SPOOL_DIR: /spool
+    volumes:
+      - .:/app
+      - ./e2e/processors/translate_en_es.py:/processors/translate_en_es.py
+      - go-cache:/go/pkg/mod
+      - pipeline-spool:/spool
+    depends_on:
+      - nats
+  tts:
+    build:
+      context: .
+      dockerfile: docker/tts.Dockerfile
+    command: ["air", "-c", ".air.worker.toml"]
+    environment:
+      QOL_NATS_URL: nats://nats:4222
+      QOL_TYPE: tts
+      QOL_SPOOL_DIR: /spool
+    volumes:
+      - .:/app
+      - ./e2e/processors/tts_spanish.py:/processors/tts_spanish.py
+      - go-cache:/go/pkg/mod
+      - pipeline-spool:/spool
+    depends_on:
+      - nats
+  record-en:
+    build:
+      context: .
+      dockerfile: docker/go.dev.Dockerfile
+    command: ["air", "-c", ".air.worker.toml"]
+    environment:
+      QOL_NATS_URL: nats://nats:4222
+      QOL_TYPE: record
+      QOL_NAME: record-en
+      QOL_INPUT: pipeline.record-en.input
+      QOL_OUTPUT: pipeline.record-en.completed
+      QOL_SPOOL_DIR: /spool
+      QOL_OUTPUT_DIR: /output
+    volumes:
+      - .:/app
+      - go-cache:/go/pkg/mod
+      - pipeline-spool:/spool
+      - ./tmp:/output
+    depends_on:
+      - nats
+  record-es:
+    build:
+      context: .
+      dockerfile: docker/go.dev.Dockerfile
+    command: ["air", "-c", ".air.worker.toml"]
+    environment:
+      QOL_NATS_URL: nats://nats:4222
+      QOL_TYPE: record
+      QOL_NAME: record-es
+      QOL_INPUT: pipeline.record-es.input
+      QOL_OUTPUT: pipeline.record-es.completed
+      QOL_SPOOL_DIR: /spool
+      QOL_OUTPUT_DIR: /output
+    volumes:
+      - .:/app
+      - go-cache:/go/pkg/mod
+      - pipeline-spool:/spool
+      - ./tmp:/output
+    depends_on:
+      - nats
   web:
     image: node:24.15.0-alpine
     working_dir: /app
@@ -60,6 +146,7 @@ services:
     depends_on:
       - qol-api
 volumes:
-  nats-dev:
+  api-data:
   go-cache:
   web-modules:
+  pipeline-spool:
