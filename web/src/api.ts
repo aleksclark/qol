@@ -7,6 +7,9 @@ import {
   ErrorSchema,
   LoginRequestSchema,
   LoginResponseSchema,
+  TopicActivityRequestSchema,
+  TopicActivityResponseSchema,
+  type TopicActivityResponse,
   type User,
 } from "./gen/qol/v1/qol_pb"
 
@@ -42,6 +45,22 @@ export async function currentUser(): Promise<User> {
 export async function uploadTicket(): Promise<string> {
   const response = await request("/v1/upload-ticket", CreateUploadTicketRequestSchema, {}, CreateUploadTicketResponseSchema)
   return response.ticket
+}
+
+export async function topicActivity(signal?: AbortSignal): Promise<TopicActivityResponse> {
+  const response = await fetch(`${apiOrigin}/v1/topic-activity`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/protobuf" },
+    body: toBinary(TopicActivityRequestSchema, create(TopicActivityRequestSchema, {})),
+    signal,
+  })
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  if (!response.ok) {
+    const problem = fromBinary(ErrorSchema, bytes)
+    throw new Error(problem.message || "Could not load topic activity")
+  }
+  return fromBinary(TopicActivityResponseSchema, bytes)
 }
 
 export async function logout(): Promise<void> {

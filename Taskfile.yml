@@ -39,7 +39,7 @@ tasks:
     desc: Start the development stack and provision the administrator
     cmds:
       - |
-        mkdir -p .dev-certs
+        mkdir -p .dev-certs tmp
         if [ ! -s .dev-certs/localhost.pem ] || \
           ! openssl x509 -in .dev-certs/localhost.pem -noout -text 2>/dev/null | grep -q 'id-ecPublicKey'; then
           openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 10 \
@@ -50,14 +50,14 @@ tasks:
         fi
         cert_hash=$(openssl x509 -in .dev-certs/localhost.pem -outform DER | openssl dgst -sha256 -binary | openssl base64 -A)
         printf 'VITE_WEBTRANSPORT_CERT_HASH=%s\n' "$cert_hash" > .dev-certs/compose.env
-      - '{{.DEV_COMPOSE}} up --remove-orphans --build --detach --scale qol-worker=2'
+      - '{{.DEV_COMPOSE}} up --remove-orphans --build --detach'
       - |
         attempts=0
         until {{.DEV_COMPOSE}} exec -T qol-api wget -q -O /dev/null http://localhost:8080/healthz >/dev/null 2>&1; do
           attempts=$((attempts + 1))
           if [ "$attempts" -ge 60 ]; then
             {{.DEV_COMPOSE}} ps -a
-            {{.DEV_COMPOSE}} logs --no-color --tail=100 qol-api qol-worker
+            {{.DEV_COMPOSE}} logs --no-color --tail=100 qol-api capture stt-whisper translate tts record-en record-es
             exit 1
           fi
           sleep 1

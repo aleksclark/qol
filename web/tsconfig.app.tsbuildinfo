@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/transport.test.ts","./src/transport.ts","./src/vite-env.d.ts","./src/gen/qol/v1/qol_pb.ts"],"version":"5.9.3"}
+{"root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/microphone.ts","./src/telemetry.test.ts","./src/telemetry.ts","./src/transport.test.ts","./src/transport.ts","./src/vite-env.d.ts","./src/gen/qol/v1/qol_pb.ts"],"version":"5.9.3"}

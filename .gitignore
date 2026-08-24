@@ -9,3 +9,5 @@ coverage/
 web/dist/
 web/node_modules/
 e2e-artifacts/
+tmp/
+__pycache__/

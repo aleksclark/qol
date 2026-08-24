@@ -2,84 +2,150 @@ package eventbus
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"time"
+	"sync"
 
-	"github.com/aleksclark/qol/domain"
+	qol "github.com/aleksclark/qol"
 	qolv1 "github.com/aleksclark/qol/gen/qol/v1"
 	"github.com/aleksclark/qol/internal/wire"
 	"github.com/nats-io/nats.go"
 	"google.golang.org/protobuf/proto"
 )
 
-const StreamName = "QOL_EVENTS"
+const subjectPrefix = "qol."
 
 type Bus struct {
-	jetstream nats.JetStreamContext
+	conn   *nats.Conn
+	mu     sync.Mutex
+	counts map[string]uint64
+}
+
+type TopicActivity struct {
+	Subject    string
+	EventCount uint64
+}
+
+type subscription struct {
+	nats *nats.Subscription
+	done chan struct{}
+	once sync.Once
+	mu   sync.Mutex
+	err  error
 }
 
 func New(connection *nats.Conn) (*Bus, error) {
-	jetstream, err := connection.JetStream()
-	if err != nil {
-		return nil, err
+	if connection == nil {
+		return nil, errors.New("NATS connection is required")
 	}
-	if _, err := jetstream.StreamInfo(StreamName); err == nats.ErrStreamNotFound {
-		_, err = jetstream.AddStream(&nats.StreamConfig{Name: StreamName, Subjects: []string{"qol.session.*.pcm.*"}, Storage: nats.FileStorage, MaxAge: 24 * time.Hour, Duplicates: 2 * time.Minute})
-		if err != nil {
-			return nil, fmt.Errorf("create event stream: %w", err)
-		}
-	}
-	return &Bus{jetstream: jetstream}, nil
+	return &Bus{conn: connection, counts: make(map[string]uint64)}, nil
 }
 
-func (b *Bus) Publish(ctx context.Context, subject string, event domain.Event) error {
+func (b *Bus) WatchActivity() error {
+	_, err := b.conn.Subscribe(subjectPrefix+"pipeline.>", func(message *nats.Msg) {
+		b.mu.Lock()
+		b.counts[message.Subject]++
+		b.mu.Unlock()
+	})
+	if err != nil {
+		return fmt.Errorf("watch pipeline activity: %w", err)
+	}
+	return nil
+}
+
+func (b *Bus) TopicActivity() ([]TopicActivity, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	activity := make([]TopicActivity, 0, len(b.counts))
+	for topic, count := range b.counts {
+		activity = append(activity, TopicActivity{Subject: topic, EventCount: count})
+	}
+	return activity, nil
+}
+
+func (b *Bus) Publish(ctx context.Context, event qol.Event) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	message, err := wire.EventToProto(event)
 	if err != nil {
 		return err
 	}
 	payload, err := proto.Marshal(message)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal event: %w", err)
 	}
-	publication := nats.NewMsg(subject)
-	publication.Data = payload
-	publication.Header.Set(nats.MsgIdHdr, event.ID)
-	_, err = b.jetstream.PublishMsg(publication, nats.Context(ctx))
+	return b.conn.Publish(subject(event.Channel), payload)
+}
+
+func (b *Bus) Subscribe(ctx context.Context, channel string, opts qol.SubscribeOptions, handler qol.Handler) (qol.Subscription, error) {
+	if channel == "" {
+		return nil, errors.New("subscription channel is required")
+	}
+	result := &subscription{done: make(chan struct{})}
+	callback := func(message *nats.Msg) {
+		event, err := decode(message.Data)
+		if err != nil {
+			return
+		}
+		_ = handler(ctx, event)
+	}
+	var err error
+	if opts.Group == "" {
+		result.nats, err = b.conn.Subscribe(subject(channel), callback)
+	} else {
+		result.nats, err = b.conn.QueueSubscribe(subject(channel), opts.Group, callback)
+	}
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		<-ctx.Done()
+		result.setError(ctx.Err())
+		_ = result.Close()
+	}()
+	return result, nil
+}
+
+func (s *subscription) Close() error {
+	var err error
+	s.once.Do(func() {
+		if s.nats != nil {
+			err = s.nats.Unsubscribe()
+		}
+		close(s.done)
+	})
 	return err
 }
 
-func (b *Bus) SubscribeOutput(subject string, handler func(domain.Event) error) (*nats.Subscription, error) {
-	return b.jetstream.Subscribe(subject, func(message *nats.Msg) {
-		event, err := decode(message.Data)
-		if err == nil {
-			err = handler(event)
-		}
-		if err == nil {
-			_ = message.Ack()
-		} else {
-			_ = message.Nak()
-		}
-	}, nats.ManualAck(), nats.AckExplicit(), nats.DeliverNew())
+func (s *subscription) Done() <-chan struct{} {
+	return s.done
 }
 
-func (b *Bus) SubscribeInputs(durable string, handler func(context.Context, domain.Event) error) (*nats.Subscription, error) {
-	return b.jetstream.QueueSubscribe("qol.session.*.pcm.input", "qol-echo", func(message *nats.Msg) {
-		event, err := decode(message.Data)
-		if err == nil {
-			err = handler(context.Background(), event)
-		}
-		if err == nil {
-			_ = message.Ack()
-		} else {
-			_ = message.Nak()
-		}
-	}, nats.Durable(durable), nats.ManualAck(), nats.AckExplicit(), nats.DeliverAll())
+func (s *subscription) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
 }
 
-func decode(payload []byte) (domain.Event, error) {
+func (s *subscription) setError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !errors.Is(err, context.Canceled) {
+		s.err = err
+	}
+}
+
+func subject(channel string) string {
+	return subjectPrefix + channel
+}
+
+func decode(payload []byte) (qol.Event, error) {
 	message := new(qolv1.Event)
 	if err := proto.Unmarshal(payload, message); err != nil {
-		return domain.Event{}, err
+		return qol.Event{}, err
 	}
 	return wire.EventFromProto(message)
 }
+
+var _ qol.Bus = (*Bus)(nil)

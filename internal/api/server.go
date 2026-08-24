@@ -6,21 +6,19 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
-	"github.com/aleksclark/qol/domain"
+	qol "github.com/aleksclark/qol"
 	qolv1 "github.com/aleksclark/qol/gen/qol/v1"
 	"github.com/aleksclark/qol/internal/auth"
 	"github.com/aleksclark/qol/internal/eventbus"
-	"github.com/aleksclark/qol/internal/media"
 	"github.com/aleksclark/qol/internal/wire"
-	"github.com/nats-io/nats.go"
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	webtransport "github.com/quic-go/webtransport-go"
 	"google.golang.org/protobuf/proto"
@@ -28,18 +26,30 @@ import (
 
 const sessionCookie = "qol_session"
 
+type topicActivitySource interface {
+	TopicActivity() ([]eventbus.TopicActivity, error)
+}
+
 type Server struct {
 	auth          *auth.Service
 	bus           *eventbus.Bus
-	decoder       *media.Decoder
+	activity      topicActivitySource
 	allowedOrigin string
 	secureCookie  bool
 	transport     *webtransport.Server
 }
 
-func New(authentication *auth.Service, bus *eventbus.Bus, decoder *media.Decoder, origin string, secureCookie bool) *Server {
-	server := &Server{auth: authentication, bus: bus, decoder: decoder, allowedOrigin: origin, secureCookie: secureCookie}
-	http3Server := &http3.Server{TLSConfig: &tls.Config{NextProtos: []string{http3.NextProtoH3}}}
+func New(authentication *auth.Service, bus *eventbus.Bus, origin string, secureCookie bool) *Server {
+	server := &Server{auth: authentication, bus: bus, activity: bus, allowedOrigin: origin, secureCookie: secureCookie}
+	http3Server := &http3.Server{
+		TLSConfig: &tls.Config{NextProtos: []string{http3.NextProtoH3}},
+		QUICConfig: &quic.Config{
+			EnableDatagrams:                  true,
+			EnableStreamResetPartialDelivery: true,
+			MaxIdleTimeout:                   30 * time.Minute,
+			KeepAlivePeriod:                  10 * time.Second,
+		},
+	}
 	webtransport.ConfigureHTTP3Server(http3Server)
 	server.transport = &webtransport.Server{H3: http3Server, CheckOrigin: func(request *http.Request) bool { return request.Header.Get("Origin") == origin }}
 	return server
@@ -51,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/login", s.login)
 	mux.HandleFunc("POST /v1/logout", s.logout)
 	mux.HandleFunc("POST /v1/current-user", s.currentUser)
+	mux.HandleFunc("POST /v1/topic-activity", s.topicActivity)
 	mux.HandleFunc("POST /v1/upload-ticket", s.uploadTicket)
 	mux.HandleFunc("CONNECT /v1/upload", s.upload)
 	return s.cors(mux)
@@ -91,6 +102,31 @@ func (s *Server) currentUser(writer http.ResponseWriter, request *http.Request) 
 	writeProto(writer, http.StatusOK, &qolv1.CurrentUserResponse{User: user})
 }
 
+func (s *Server) topicActivity(writer http.ResponseWriter, request *http.Request) {
+	if _, ok := s.authorize(writer, request); !ok {
+		return
+	}
+	input := new(qolv1.TopicActivityRequest)
+	if !readProto(writer, request, input) {
+		return
+	}
+	activity, err := s.activity.TopicActivity()
+	if err != nil {
+		writeError(writer, http.StatusServiceUnavailable, "activity_unavailable", "Could not inspect pipeline activity")
+		return
+	}
+	counts := make(map[string]uint64, len(activity))
+	for _, topic := range activity {
+		counts[topic.Subject] = topic.EventCount
+	}
+	response := &qolv1.TopicActivityResponse{ObservedAtUnixMilli: time.Now().UnixMilli()}
+	for _, channel := range pipelineChannels() {
+		subject := "qol." + channel
+		response.Topics = append(response.Topics, &qolv1.TopicActivity{Subject: subject, EventCount: counts[subject]})
+	}
+	writeProto(writer, http.StatusOK, response)
+}
+
 func (s *Server) uploadTicket(writer http.ResponseWriter, request *http.Request) {
 	user, ok := s.authorize(writer, request)
 	if !ok {
@@ -111,119 +147,131 @@ func (s *Server) upload(writer http.ResponseWriter, request *http.Request) {
 	}
 	session, err := s.transport.Upgrade(writer, request)
 	if err != nil {
+		slog.Error("webtransport upgrade failed", "err", err)
 		return
 	}
-	go s.serveSession(session)
+	s.serveSession(session)
 }
 
 func (s *Server) serveSession(session *webtransport.Session) {
-	defer session.CloseWithError(0, "complete")
+	closeMsg := "session_ended"
+	defer func() {
+		if closeMsg != "" {
+			_ = session.CloseWithError(0, closeMsg)
+		}
+	}()
 	stream, err := session.AcceptStream(session.Context())
 	if err != nil {
+		closeMsg = "accept_failed"
+		slog.Error("webtransport accept stream failed", "err", err)
 		return
 	}
 	reader := bufio.NewReader(stream)
-	start := new(qolv1.ClientFrame)
-	if err := wire.ReadFrame(reader, start); err != nil || start.GetStartUpload() == nil {
+	frame := new(qolv1.ClientFrame)
+	if err := wire.ReadFrame(reader, frame); err != nil || frame.GetStartUpload() == nil {
+		closeMsg = "invalid_start"
+		slog.Error("webtransport start frame invalid", "err", err)
 		_ = wire.WriteFrame(stream, serverError("invalid_start", "The first frame must start an upload"))
 		return
 	}
-	sessionID := randomID(start.GetStartUpload().Name, strconv.FormatInt(time.Now().UnixNano(), 10))
+	start := frame.GetStartUpload()
+	if start.MediaType == "" {
+		start.MediaType = "audio/mpeg"
+	}
+	sessionID := randomID(start.Name, strconv.FormatInt(time.Now().UnixNano(), 10))
 	if err := wire.WriteFrame(stream, &qolv1.ServerFrame{Body: &qolv1.ServerFrame_UploadAccepted{UploadAccepted: &qolv1.UploadAccepted{SessionId: sessionID}}}); err != nil {
+		closeMsg = "accept_write_failed"
+		slog.Error("webtransport accept write failed", "err", err, "session", sessionID)
 		return
 	}
-	input, output, wait, err := s.decoder.Start(session.Context())
-	if err != nil {
-		_ = wire.WriteFrame(stream, serverError("decoder_failed", err.Error()))
-		return
-	}
-	var writerMu sync.Mutex
-	var outputCount uint64
-	seen := make(map[string]struct{})
-	subscription, err := s.bus.SubscribeOutput(fmt.Sprintf("qol.session.%s.pcm.output", sessionID), func(event domain.Event) error {
-		writerMu.Lock()
-		defer writerMu.Unlock()
-		if _, exists := seen[event.ID]; exists {
+	completed := make(chan qol.Event, 2)
+	var subscriptions []qol.Subscription
+	for _, channel := range []string{qol.ChannelRecordENCompleted, qol.ChannelRecordESCompleted} {
+		subscription, err := s.bus.Subscribe(session.Context(), channel, qol.SubscribeOptions{}, func(_ context.Context, event qol.Event) error {
+			if event.SessionID == sessionID {
+				select {
+				case completed <- event:
+				default:
+				}
+			}
 			return nil
-		}
-		seen[event.ID] = struct{}{}
-		message, err := wire.EventToProto(event)
+		})
 		if err != nil {
-			return err
+			closeMsg = "subscription_failed"
+			_ = wire.WriteFrame(stream, serverError("subscription_failed", err.Error()))
+			return
 		}
-		if err := wire.WriteFrame(stream, &qolv1.ServerFrame{Body: &qolv1.ServerFrame_OutputEvent{OutputEvent: message}}); err != nil {
-			return err
-		}
-		outputCount++
-		return nil
-	})
-	if err != nil {
-		_ = wire.WriteFrame(stream, serverError("subscription_failed", err.Error()))
-		return
+		subscriptions = append(subscriptions, subscription)
 	}
-	defer subscription.Unsubscribe()
-	decodeDone := make(chan error, 1)
-	var inputCount uint64
-	go func() {
-		decodeDone <- s.publishPCM(session.Context(), sessionID, output, &inputCount)
+	defer func() {
+		for _, subscription := range subscriptions {
+			_ = subscription.Close()
+		}
 	}()
+	var expected uint64
 	for {
-		frame := new(qolv1.ClientFrame)
+		frame = new(qolv1.ClientFrame)
 		if err := wire.ReadFrame(reader, frame); err != nil {
-			_ = input.Close()
-			break
+			closeMsg = "upload_failed"
+			slog.Error("webtransport audio ended early", "err", err, "session", sessionID, "expected", expected)
+			_ = wire.WriteFrame(stream, serverError("upload_failed", "Audio stream ended before completion"))
+			return
 		}
-		chunk := frame.GetMp3Chunk()
-		if chunk == nil {
-			_ = input.Close()
-			break
+		chunk := frame.GetAudioChunk()
+		if chunk == nil || chunk.Sequence != expected {
+			closeMsg = "invalid_sequence"
+			_ = wire.WriteFrame(stream, serverError("invalid_sequence", fmt.Sprintf("Expected audio chunk %d", expected)))
+			return
 		}
-		if len(chunk.Data) > 0 {
-			if _, err := input.Write(chunk.Data); err != nil {
-				break
-			}
+		payload, err := wire.MarshalAudioStream(start.MediaType, start.Name, chunk.EndOfStream, chunk.Data)
+		if err != nil {
+			closeMsg = "invalid_audio"
+			_ = wire.WriteFrame(stream, serverError("invalid_audio", err.Error()))
+			return
 		}
+		event := qol.Event{ID: randomID(sessionID, strconv.FormatUint(chunk.Sequence, 10)), SessionID: sessionID, Channel: qol.ChannelCaptureInput, Type: qol.TypeAudioStream, Seq: chunk.Sequence, ProducedAt: time.Now().UTC(), Encoding: qol.EncodingProtobuf, Payload: payload}
+		if err := s.bus.Publish(session.Context(), event); err != nil {
+			closeMsg = "publish_failed"
+			_ = wire.WriteFrame(stream, serverError("publish_failed", err.Error()))
+			return
+		}
+		expected++
 		if chunk.EndOfStream {
-			_ = input.Close()
 			break
 		}
 	}
-	decodeErr := <-decodeDone
-	waitErr := wait()
-	if decodeErr != nil || waitErr != nil {
-		_ = wire.WriteFrame(stream, serverError("decode_failed", "MP3 decoding failed"))
+	paths := make(map[string]string, 2)
+	deadline := time.After(30 * time.Minute)
+	for len(paths) < 2 {
+		select {
+		case event := <-completed:
+			stored, err := wire.UnmarshalStoredAudio(event.Payload)
+			if err != nil {
+				closeMsg = "invalid_completion"
+				_ = wire.WriteFrame(stream, serverError("invalid_completion", err.Error()))
+				return
+			}
+			paths[event.Channel] = stored.Path
+		case <-deadline:
+			closeMsg = "pipeline_timeout"
+			_ = wire.WriteFrame(stream, serverError("pipeline_timeout", "The pipeline did not complete in time"))
+			return
+		case <-session.Context().Done():
+			closeMsg = "session_canceled"
+			slog.Error("webtransport session canceled while waiting", "session", sessionID, "have", len(paths))
+			return
+		}
+	}
+	outputPaths := []string{paths[qol.ChannelRecordENCompleted], paths[qol.ChannelRecordESCompleted]}
+	if err := wire.WriteFrame(stream, &qolv1.ServerFrame{Body: &qolv1.ServerFrame_UploadCompleted{UploadCompleted: &qolv1.UploadCompleted{SessionId: sessionID, Status: "complete", OutputPath: outputPaths[1], OutputPaths: outputPaths}}}); err != nil {
+		closeMsg = "complete_write_failed"
+		slog.Error("webtransport completion write failed", "err", err, "session", sessionID)
 		return
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for outputCount < inputCount && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	writerMu.Lock()
-	defer writerMu.Unlock()
-	_ = wire.WriteFrame(stream, &qolv1.ServerFrame{Body: &qolv1.ServerFrame_UploadCompleted{UploadCompleted: &qolv1.UploadCompleted{InputEvents: inputCount, OutputEvents: outputCount}}})
-}
-
-func (s *Server) publishPCM(ctx context.Context, sessionID string, output io.Reader, count *uint64) error {
-	buffer := make([]byte, media.ChunkFrames*2)
-	var frames uint64
-	for {
-		size, err := io.ReadFull(output, buffer)
-		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
-			return err
-		}
-		if size > 0 {
-			frameCount := uint32(size / 2)
-			sequence := *count
-			event := domain.Event{ID: randomID(sessionID, strconv.FormatUint(sequence, 10)), SessionID: sessionID, Sequence: sequence, Span: domain.Span{Start: domain.MediaTime(frames * 1_000_000_000 / media.SampleRate), End: domain.MediaTime((frames + uint64(frameCount)) * 1_000_000_000 / media.SampleRate)}, Produced: time.Now().UTC(), PCM: domain.PCM{SampleRate: media.SampleRate, Channels: media.Channels, Frames: frameCount, Data: append([]byte(nil), buffer[:size]...)}}
-			if err := s.bus.Publish(ctx, fmt.Sprintf("qol.session.%s.pcm.input", sessionID), event); err != nil {
-				return err
-			}
-			frames += uint64(frameCount)
-			*count++
-		}
-		if err != nil {
-			return nil
-		}
+	closeMsg = ""
+	select {
+	case <-session.Context().Done():
+	case <-time.After(10 * time.Second):
 	}
 }
 
@@ -284,6 +332,20 @@ func serverError(code, message string) *qolv1.ServerFrame {
 	return &qolv1.ServerFrame{Body: &qolv1.ServerFrame_Error{Error: &qolv1.Error{Code: code, Message: message}}}
 }
 
+func pipelineChannels() []string {
+	return []string{
+		qol.ChannelCaptureInput,
+		qol.ChannelCaptureOutput,
+		qol.ChannelAudioInput,
+		qol.ChannelRecordENInput,
+		qol.ChannelASRText,
+		qol.ChannelTranslationText,
+		qol.ChannelTTSAudio,
+		qol.ChannelRecordENCompleted,
+		qol.ChannelRecordESCompleted,
+	}
+}
+
 func randomID(parts ...string) string {
 	hash := sha256.New()
 	for _, part := range parts {
@@ -292,5 +354,3 @@ func randomID(parts ...string) string {
 	}
 	return hex.EncodeToString(hash.Sum(nil))
 }
-
-var _ = nats.ErrConnectionClosed
