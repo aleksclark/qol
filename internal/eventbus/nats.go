@@ -42,13 +42,13 @@ func New(connection *nats.Conn) (*Bus, error) {
 }
 
 func (b *Bus) WatchActivity() error {
-	_, err := b.conn.Subscribe(subjectPrefix+"pipeline.>", func(message *nats.Msg) {
+	_, err := b.conn.Subscribe(subjectPrefix+"graph.>", func(message *nats.Msg) {
 		b.mu.Lock()
 		b.counts[message.Subject]++
 		b.mu.Unlock()
 	})
 	if err != nil {
-		return fmt.Errorf("watch pipeline activity: %w", err)
+		return fmt.Errorf("watch graph activity: %w", err)
 	}
 	return nil
 }

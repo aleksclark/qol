@@ -49,7 +49,7 @@ tasks:
             -out .dev-certs/localhost.pem >/dev/null 2>&1
         fi
         cert_hash=$(openssl x509 -in .dev-certs/localhost.pem -outform DER | openssl dgst -sha256 -binary | openssl base64 -A)
-        printf 'VITE_WEBTRANSPORT_CERT_HASH=%s\n' "$cert_hash" > .dev-certs/compose.env
+        printf 'VITE_WEBTRANSPORT_CERT_HASH=%s\nQOL_UID=%s\nQOL_GID=%s\n' "$cert_hash" "$(id -u)" "$(id -g)" > .dev-certs/compose.env
       - '{{.DEV_COMPOSE}} up --remove-orphans --build --detach'
       - |
         attempts=0

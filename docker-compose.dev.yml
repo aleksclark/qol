@@ -55,7 +55,7 @@ services:
       - .:/app
       - ./e2e/processors/stt_whisper.py:/processors/stt_whisper.py
       - go-cache:/go/pkg/mod
-      - pipeline-spool:/spool
+      - graph-spool:/spool
     depends_on:
       - nats
   translate:
@@ -71,7 +71,7 @@ services:
       - .:/app
       - ./e2e/processors/translate_en_es.py:/processors/translate_en_es.py
       - go-cache:/go/pkg/mod
-      - pipeline-spool:/spool
+      - graph-spool:/spool
     depends_on:
       - nats
   tts:
@@ -87,7 +87,7 @@ services:
       - .:/app
       - ./e2e/processors/tts_spanish.py:/processors/tts_spanish.py
       - go-cache:/go/pkg/mod
-      - pipeline-spool:/spool
+      - graph-spool:/spool
     depends_on:
       - nats
   record-en:
@@ -95,18 +95,21 @@ services:
       context: .
       dockerfile: docker/go.dev.Dockerfile
     command: ["air", "-c", ".air.worker.toml"]
+    user: "${QOL_UID:-1000}:${QOL_GID:-1000}"
     environment:
       QOL_NATS_URL: nats://nats:4222
       QOL_TYPE: record
       QOL_NAME: record-en
-      QOL_INPUT: pipeline.record-en.input
-      QOL_OUTPUT: pipeline.record-en.completed
+      QOL_INPUT: graph.record-en.input
+      QOL_OUTPUT: graph.record-en.completed
       QOL_SPOOL_DIR: /spool
       QOL_OUTPUT_DIR: /output
+      HOME: /tmp
+      GOCACHE: /tmp/go-cache
+      GOMODCACHE: /tmp/go-mod
     volumes:
       - .:/app
-      - go-cache:/go/pkg/mod
-      - pipeline-spool:/spool
+      - graph-spool:/spool
       - ./tmp:/output
     depends_on:
       - nats
@@ -115,18 +118,21 @@ services:
       context: .
       dockerfile: docker/go.dev.Dockerfile
     command: ["air", "-c", ".air.worker.toml"]
+    user: "${QOL_UID:-1000}:${QOL_GID:-1000}"
     environment:
       QOL_NATS_URL: nats://nats:4222
       QOL_TYPE: record
       QOL_NAME: record-es
-      QOL_INPUT: pipeline.record-es.input
-      QOL_OUTPUT: pipeline.record-es.completed
+      QOL_INPUT: graph.record-es.input
+      QOL_OUTPUT: graph.record-es.completed
       QOL_SPOOL_DIR: /spool
       QOL_OUTPUT_DIR: /output
+      HOME: /tmp
+      GOCACHE: /tmp/go-cache
+      GOMODCACHE: /tmp/go-mod
     volumes:
       - .:/app
-      - go-cache:/go/pkg/mod
-      - pipeline-spool:/spool
+      - graph-spool:/spool
       - ./tmp:/output
     depends_on:
       - nats
@@ -149,4 +155,4 @@ volumes:
   api-data:
   go-cache:
   web-modules:
-  pipeline-spool:
+  graph-spool:

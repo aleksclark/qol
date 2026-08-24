@@ -2,7 +2,7 @@
 
 Qol is a streaming voice translation system. The name is the Hebrew word for voice.
 
-## Pipeline
+## Graph
 
 1. The administrator or `qol-feed` streams an audio file or live microphone capture through WebTransport onto `capture`.
 2. `capture` fans each source chunk onto STT and the English record instance.

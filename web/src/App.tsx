@@ -129,9 +129,9 @@ function Console({ user, onLogout }: { user: User; onLogout: () => Promise<void>
       <div className="account"><span>{user.username}</span><small>Administrator</small><button className="ghost" onClick={onLogout}>Sign out</button></div>
     </nav>
     <main className="workspace">
-      <header><div><span className="eyebrow">NATS · live telemetry</span><h1>Pipeline topics</h1><p>Watch event throughput across every voice processing channel while audio moves through the system.</p></div><span className={`status ${topicError ? "warning" : "ok"}`}>{topicError ? "Telemetry stale" : "Live"}</span></header>
+      <header><div><span className="eyebrow">NATS · live telemetry</span><h1>Graph topics</h1><p>Watch event throughput across every voice processing channel while audio moves through the system.</p></div><span className={`status ${topicError ? "warning" : "ok"}`}>{topicError ? "Telemetry stale" : "Live"}</span></header>
       <section className="upload-panel">
-        <div><h2>Source audio</h2><p>Upload an audio file or capture the microphone, then stream it through the pipeline to Ogg/Opus output.</p></div>
+        <div><h2>Source audio</h2><p>Upload an audio file or capture the microphone, then stream it through the graph to Ogg/Opus output.</p></div>
         <div className="source-controls">
           <div className="source-tabs" role="group" aria-label="Audio source"><button className={source === "file" ? "selected" : "ghost"} onClick={() => setSource("file")}>Audio file</button><button className={source === "microphone" ? "selected" : "ghost"} onClick={() => setSource("microphone")}>Microphone</button></div>
           {source === "file" ? <div className="upload-controls"><label className="file-control"><span>{file ? file.name : "Choose an audio file"}</span><input aria-label="Audio file" type="file" accept="audio/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label><button className="primary" disabled={!file || state === "Streaming" || state === "Connecting"} onClick={start}>Start stream</button></div> : <div className="microphone-control"><div><strong>{capture ? "Microphone live" : "Microphone ready"}</strong><span>{capture ? "Audio is streaming until you stop recording." : "Browser permission is requested when recording starts."}</span></div>{capture ? <button className="stop" onClick={() => capture.stop()}>Stop recording</button> : <button className="primary" disabled={state === "Requesting microphone"} onClick={start}>Start recording</button>}</div>}
@@ -139,13 +139,13 @@ function Console({ user, onLogout }: { user: User; onLogout: () => Promise<void>
       </section>
       {error && <div className="notice error" role="alert">{error}</div>}
       <section className="activity">
-        <div className="section-title"><div><h2>NATS subjects</h2><p>{topicError || (observedAt ? `Counts sampled ${new Date(observedAt).toLocaleTimeString()}` : "Connecting to pipeline telemetry")}</p></div>{session && <code>{session.slice(0, 16)}</code>}</div>
+        <div className="section-title"><div><h2>NATS subjects</h2><p>{topicError || (observedAt ? `Counts sampled ${new Date(observedAt).toLocaleTimeString()}` : "Connecting to graph telemetry")}</p></div>{session && <code>{session.slice(0, 16)}</code>}</div>
         <div className="topic-table" aria-label="NATS topic event activity" aria-live="polite">
           <div className="topic-row table-head"><span>Subject</span><span>Events / second</span><span>Total</span></div>
           {topics.length === 0 ? <div className="empty"><strong>No topic samples yet</strong><span>Waiting for the first NATS activity snapshot.</span></div> : topics.map((topic) => <TopicRow key={topic.subject} topic={topic} />)}
         </div>
       </section>
-      {outputPaths.length > 0 && <section className="pipeline-result" aria-label="Pipeline output">{outputPaths.map((path, index) => <div key={path}><span>{index === 0 ? "English Ogg/Opus" : "Spanish Ogg/Opus"}</span><code>{path}</code></div>)}</section>}
+      {outputPaths.length > 0 && <section className="graph-result" aria-label="Graph output">{outputPaths.map((path, index) => <div key={path}><span>{index === 0 ? "English Ogg/Opus" : "Spanish Ogg/Opus"}</span><code>{path}</code></div>)}</section>}
     </main>
   </div>
 }
