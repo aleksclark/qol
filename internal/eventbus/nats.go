@@ -86,9 +86,12 @@ func (b *Bus) Subscribe(ctx context.Context, channel string, opts qol.SubscribeO
 	callback := func(message *nats.Msg) {
 		event, err := decode(message.Data)
 		if err != nil {
+			result.setError(err)
 			return
 		}
-		_ = handler(ctx, event)
+		if err := handler(ctx, event); err != nil {
+			result.setError(err)
+		}
 	}
 	var err error
 	if opts.Group == "" {

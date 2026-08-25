@@ -1,5 +1,6 @@
 .env
 .dev-certs/
+*.token
 *.pem
 *.key
 bin/

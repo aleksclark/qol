@@ -14,6 +14,11 @@ tasks:
     cmds:
       - go test ./...
 
+  test:e2e:crosstalk-qol:
+    desc: Opt-in compiled Crosstalk proofs. Requires a live ct-server and QOL_CROSSTALK_URL.
+    cmds:
+      - QOL_CROSSTALK_E2E=1 go test ./e2e -count=1 -timeout 3m -run 'TestCrosstalk'
+
   lint:
     cmds:
       - buf lint
@@ -36,7 +41,7 @@ tasks:
       - npm --prefix web run build
 
   dev:
-    desc: Start the development stack and provision the administrator
+    desc: Start the development stack and provision the administrator. Crosstalk is opt-in via COMPOSE_PROFILES=crosstalk.
     cmds:
       - |
         mkdir -p .dev-certs tmp

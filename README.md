@@ -16,7 +16,7 @@ Every worker conforms to the generic `Stage` contract in `core.go`: `Spec()` dec
 ## Services
 
 - `qol-api`: protobuf HTTP control plane and WebTransport upload gateway
-- `qol-worker`: one generic `Stage` selected with `--type` and, for `record`, `--name` / `--input` / `--output`
+- `qol-worker`: one generic `Stage` selected with `--type` and, for `record`, `--name` / `--input` / `--output`. `--type crosstalk` is the optional ABC bridge.
 - `qol-feed`: CLI that emulates the administrator upload through WebTransport
 - `web`: React administrator interface
 - NATS: core publish/subscribe event transport
@@ -40,6 +40,33 @@ go run ./cmd/qol-feed http://localhost:9875 --username admin --password change-m
 ```
 
 Recorded English and Spanish Ogg/Opus files are written to `tmp/`.
+
+## Crosstalk ABC
+
+`crosstalk` is an optional bidirectional stage. It authenticates to a Crosstalk server as an Audio Booth Connector, publishes monitor audio onto a Qol source channel, and/or sinks a Qol producer channel back through the ABC send track.
+
+```sh
+qol-worker run --type crosstalk \
+  --crosstalk-url https://crosstalk.example \
+  --crosstalk-token-file /run/secrets/crosstalk_token \
+  --crosstalk-source-channel graph.stt-whisper.input \
+  --crosstalk-sink-channel graph.record-es.input \
+  --crosstalk-output-profile ogg-opus
+```
+
+`--crosstalk-url` is the HTTP origin. The ABC client appends `/ws/signaling`. Do not pass the full WebSocket path.
+
+- Source-only and sink-only work by omitting the unused channel. Input and output channels must differ.
+- Output profile is explicit: `pcm-s16le` / `pcm-f32le` with `--crosstalk-output-rate` / `--crosstalk-output-channels`, or `ogg-opus`.
+- Prefer `QOL_CROSSTALK_TOKEN_FILE`. An env/flag token is accepted for local use and logs a warning. The token never appears in usage defaults, events, health JSON, or logs.
+- Each assigned ABC epoch maps to Qol session `assigned/peer/epoch`. Reconnects emit EOS and start a new sequence space.
+- Default sink subscription is live fan-out. Competing-consumer mode requires `--crosstalk-competing`.
+- NATS delivery is live and non-durable. Readiness is a health file (`qol-worker health` exits 0 only when assigned and converting). Reasons include `connecting`, `unassigned`, `retrying`, `auth`, `protocol`, `unsupported-codec`.
+- Ordinary `task dev` does not start Crosstalk. Opt in with `COMPOSE_PROFILES=crosstalk`, a reachable `QOL_CROSSTALK_URL` (often `host.docker.internal`), and a token file at `.dev-certs/crosstalk.token` or `QOL_CROSSTALK_TOKEN_FILE`.
+- `--crosstalk-disable-mdns` and `--crosstalk-disable-stun` are localhost ICE helpers. Leave them off in production.
+- Admin/`ct-play` can publish into a `broadcast` channel, not a `feed`. For Crosstalk→Qol, set the ABC monitor to that broadcast. For Qol→Crosstalk, leave the monitor unset so a feed listener hears the ABC produce track.
+- Acoustic loop is still possible if Crosstalk monitors the same room the ABC feed plays into.
+- Compiled PCM, encoded, duplex, isolation, and SIGTERM proofs are skip-by-default. With a live `ct-server`, run `QOL_CROSSTALK_E2E=1 task test:e2e:crosstalk-qol`. Ordinary `task test` does not start Crosstalk.
 
 ## Verification
 

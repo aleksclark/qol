@@ -41,6 +41,7 @@ func TestTopicActivityListsEveryGraphSubject(t *testing.T) {
 	server.activity = staticActivity{topics: []eventbus.TopicActivity{
 		{Subject: "qol.graph.capture.input", EventCount: 12},
 		{Subject: "qol.graph.record-es.completed", EventCount: 3},
+		{Subject: "qol.graph.crosstalk.source", EventCount: 7},
 	}}
 	request := httptest.NewRequest(http.MethodPost, "/v1/topic-activity", nil)
 	request.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
@@ -53,14 +54,18 @@ func TestTopicActivityListsEveryGraphSubject(t *testing.T) {
 	if err := proto.Unmarshal(response.Body.Bytes(), message); err != nil {
 		t.Fatal(err)
 	}
-	if len(message.Topics) != 9 {
-		t.Fatalf("got %d topics, want 9", len(message.Topics))
+	if len(message.Topics) != 10 {
+		t.Fatalf("got %d topics, want 10", len(message.Topics))
 	}
 	if message.Topics[0].Subject != "qol.graph.capture.input" || message.Topics[0].EventCount != 12 {
 		t.Fatalf("unexpected first topic: %#v", message.Topics[0])
 	}
 	if message.Topics[1].EventCount != 0 || message.Topics[8].EventCount != 3 {
 		t.Fatalf("missing zero or completed counts: %#v", message.Topics)
+	}
+	last := message.Topics[len(message.Topics)-1]
+	if last.Subject != "qol.graph.crosstalk.source" || last.EventCount != 7 {
+		t.Fatalf("missing watched crosstalk subject: %#v", last)
 	}
 	if message.ObservedAtUnixMilli == 0 {
 		t.Fatal("observation time is missing")

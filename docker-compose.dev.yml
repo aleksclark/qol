@@ -136,6 +136,31 @@ services:
       - ./tmp:/output
     depends_on:
       - nats
+  crosstalk:
+    profiles: ["crosstalk"]
+    build:
+      context: .
+      dockerfile: docker/crosstalk.Dockerfile
+    user: "65532:65532"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - "run"
+      - "--type"
+      - "crosstalk"
+      - "--nats-url"
+      - "nats://nats:4222"
+    environment:
+      QOL_CROSSTALK_URL: ${QOL_CROSSTALK_URL:-}
+      QOL_CROSSTALK_TOKEN_FILE: /run/secrets/crosstalk_token
+      QOL_CROSSTALK_SINK_CHANNEL: ${QOL_CROSSTALK_SINK_CHANNEL:-graph.record-es.input}
+      QOL_CROSSTALK_SOURCE_CHANNEL: ${QOL_CROSSTALK_SOURCE_CHANNEL:-graph.stt-whisper.input}
+      QOL_CROSSTALK_OUTPUT_PROFILE: ${QOL_CROSSTALK_OUTPUT_PROFILE:-ogg-opus}
+      QOL_HEALTH_FILE: /tmp/qol-crosstalk-health
+    volumes:
+      - ${QOL_CROSSTALK_TOKEN_FILE:-./.dev-certs/crosstalk.token}:/run/secrets/crosstalk_token:ro
+    depends_on:
+      - nats
   web:
     image: node:24.15.0-alpine
     working_dir: /app

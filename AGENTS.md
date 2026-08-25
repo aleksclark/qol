@@ -9,7 +9,8 @@ Qol is a streaming voice translation system with a Go control plane and stage wo
 - Web tests: `task web-test` or `npm --prefix web test -- --run`
 - Web typecheck: `npm --prefix web run typecheck`
 - Protobuf lint/generation: `buf lint && buf generate`
-- Development stack: run `task dev`. Dedicated worker images contain their processor dependencies and models.
+- Development stack: run `task dev`. Dedicated worker images contain their processor dependencies and models. Crosstalk is opt-in: `COMPOSE_PROFILES=crosstalk task dev`.
+- Crosstalk compiled proofs: `QOL_CROSSTALK_E2E=1 task test:e2e:crosstalk-qol` against a live `ct-server`. Ordinary `task test` skips them.
 - Stop development: `task dev:down`; API data and the graph spool persist. Recorded Ogg/Opus files land in gitignored `tmp/`.
 
 Full local gate:
@@ -32,7 +33,7 @@ The Compose e2e service is startup-only. It does not run model inference or the 
 ## Architecture and data flow
 
 - `cmd/qol-api`: Cobra entrypoint, NATS wiring, disk persistence, HTTP/HTTP3 lifecycle, and admin bootstrap.
-- `cmd/qol-worker`: composition root for one stage selected by `--type=capture|stt-whisper|translate|tts|record`. `--name`, `--input`, and `--output` distinguish record instances.
+- `cmd/qol-worker`: composition root for one stage selected by `--type=capture|stt-whisper|translate|tts|record|crosstalk`. `--name`, `--input`, and `--output` distinguish record instances. Crosstalk uses dedicated `--crosstalk-*` flags and `_FILE` token injection.
 - `cmd/qol-feed`: CLI that logs in, takes an upload ticket, and streams a file through WebTransport at playback rate like a live microphone.
 - Root package (`core.go`, `payloads.go`, `types.go`): transport-independent generic event, bus, stage, port, replay, and semantic payload contracts.
 - `internal/api`: protobuf HTTP auth and WebTransport upload. It publishes uploaded chunks to the capture subject and waits for both record completion events.

@@ -10,7 +10,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	qol "github.com/aleksclark/qol"
@@ -120,8 +122,7 @@ func (s *Server) topicActivity(writer http.ResponseWriter, request *http.Request
 		counts[topic.Subject] = topic.EventCount
 	}
 	response := &qolv1.TopicActivityResponse{ObservedAtUnixMilli: time.Now().UnixMilli()}
-	for _, channel := range graphChannels() {
-		subject := "qol." + channel
+	for _, subject := range activitySubjects(counts) {
 		response.Topics = append(response.Topics, &qolv1.TopicActivity{Subject: subject, EventCount: counts[subject]})
 	}
 	writeProto(writer, http.StatusOK, response)
@@ -344,6 +345,28 @@ func graphChannels() []string {
 		qol.ChannelRecordENCompleted,
 		qol.ChannelRecordESCompleted,
 	}
+}
+
+func activitySubjects(counts map[string]uint64) []string {
+	seen := make(map[string]struct{}, len(counts)+len(graphChannels()))
+	subjects := make([]string, 0, len(counts)+len(graphChannels()))
+	for _, channel := range graphChannels() {
+		subject := "qol." + channel
+		seen[subject] = struct{}{}
+		subjects = append(subjects, subject)
+	}
+	var extra []string
+	for subject := range counts {
+		if _, ok := seen[subject]; ok {
+			continue
+		}
+		if !strings.HasPrefix(subject, "qol.graph.") {
+			continue
+		}
+		extra = append(extra, subject)
+	}
+	sort.Strings(extra)
+	return append(subjects, extra...)
 }
 
 func randomID(parts ...string) string {
