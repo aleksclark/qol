@@ -4,6 +4,7 @@ go 1.26.6
 
 require (
 	github.com/aleksclark/crosstalk/abc v0.0.0-20260825015307-1b014556ccf4
+	github.com/nats-io/nats-server/v2 v2.12.6
 	github.com/nats-io/nats.go v1.53.1
 	github.com/pion/ice/v4 v4.2.7
 	github.com/pion/rtp v1.10.2
@@ -14,6 +15,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	golang.org/x/crypto v0.49.0
 	google.golang.org/protobuf v1.36.11
+	nhooyr.io/websocket v1.8.17
 )
 
 require (
@@ -27,7 +29,6 @@ require (
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/minio/highwayhash v1.0.4-0.20251030100505-070ab1a87a76 // indirect
 	github.com/nats-io/jwt/v2 v2.8.1 // indirect
-	github.com/nats-io/nats-server/v2 v2.12.6 // indirect
 	github.com/nats-io/nkeys v0.4.15 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
@@ -57,5 +58,4 @@ require (
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	nhooyr.io/websocket v1.8.17 // indirect
 )

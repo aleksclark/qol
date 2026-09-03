@@ -106,13 +106,17 @@ type Crosstalk struct {
 	logger  *slog.Logger
 
 	mu             sync.Mutex
+	sinkRTMu       sync.Mutex
 	activeSession  string
 	nextSeq        uint64
 	outbound       *media.Outbound
+	epochCtx       context.Context
+	epochABC       ABCSession
 	epochSessionID string
 	epochReady     bool
 	sourceSeq      uint64
 	eosSent        bool
+	sinkSeq        uint16
 	health         CrosstalkHealth
 	epochErrc      chan error
 }
@@ -208,8 +212,11 @@ func (c *Crosstalk) Run(ctx context.Context, bus qol.Bus) error {
 			err := c.handleSink(eventContext, event)
 			if err != nil {
 				c.failEpoch(err)
+				// The subscription outlives an epoch. Returning the error would
+				// terminate delivery and leave a reconnected epoch half-live.
+				return nil
 			}
-			return err
+			return nil
 		})
 		if err != nil {
 			c.setHealth(CrosstalkHealth{Reason: "nats-subscribe"})
@@ -307,6 +314,8 @@ func (c *Crosstalk) runEpoch(ctx context.Context, bus qol.Bus, session ABCSessio
 	errc := make(chan error, 4)
 	c.mu.Lock()
 	c.epochErrc = errc
+	c.epochCtx = epochCtx
+	c.epochABC = session
 	c.mu.Unlock()
 	var inbound *media.Inbound
 	var workers sync.WaitGroup
@@ -318,6 +327,7 @@ func (c *Crosstalk) runEpoch(ctx context.Context, bus qol.Bus, session ABCSessio
 		}
 		inbound = converter
 		if err := inbound.Start(epochCtx); err != nil {
+			c.metrics.setReason("conversion-failure")
 			_ = inbound.Close()
 			c.finishEpoch(ctx, bus, sessionID, "inbound-start")
 			return err
@@ -326,35 +336,30 @@ func (c *Crosstalk) runEpoch(ctx context.Context, bus qol.Bus, session ABCSessio
 		go func() {
 			defer workers.Done()
 			if err := c.publishInbound(epochCtx, bus, sessionID, inbound); err != nil && epochCtx.Err() == nil {
-				errc <- err
+				c.metrics.SourceErrors.Add(1)
+				c.failEpoch(converterError("source", err))
 			}
 		}()
 	}
 	if c.cfg.InputChannel != "" {
-		converter, err := media.NewOutbound(media.OutboundConfig{FFmpeg: c.cfg.FFmpeg, Codec: codec, Queue: c.cfg.Queue, Overflow: c.cfg.Overflow})
+		c.mu.Lock()
+		c.epochSessionID = sessionID
+		c.epochReady = true
+		c.activeSession = ""
+		c.nextSeq = 0
+		c.sourceSeq = 0
+		c.eosSent = false
+		c.sinkSeq = 0
+		err := c.startOutboundLocked()
+		c.mu.Unlock()
 		if err != nil {
-			if inbound != nil {
-				_ = inbound.Close()
-			}
-			c.finishEpoch(ctx, bus, sessionID, "outbound-init")
-			return err
-		}
-		if err := converter.Start(epochCtx); err != nil {
-			_ = converter.Close()
+			c.metrics.setReason("conversion-failure")
 			if inbound != nil {
 				_ = inbound.Close()
 			}
 			c.finishEpoch(ctx, bus, sessionID, "outbound-start")
 			return err
 		}
-		c.setOutbound(sessionID, converter)
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			if err := c.forwardOutbound(epochCtx, session, converter); err != nil && epochCtx.Err() == nil {
-				errc <- err
-			}
-		}()
 	} else {
 		c.setOutbound(sessionID, nil)
 	}
@@ -404,8 +409,8 @@ func (c *Crosstalk) runEpoch(ctx context.Context, bus qol.Bus, session ABCSessio
 		}
 	case err := <-errc:
 		runErr = err
-		c.metrics.SourceErrors.Add(1)
-		c.metrics.setReason("direction-error")
+		c.metrics.setReason("conversion-failure")
+		c.logger.Error("crosstalk converter failed", "stage", c.cfg.Name, "qol_session", sessionID, "epoch", welcome.Epoch, "err", err)
 	}
 	cancel()
 	if inbound != nil {
@@ -415,6 +420,13 @@ func (c *Crosstalk) runEpoch(ctx context.Context, bus qol.Bus, session ABCSessio
 	workers.Wait()
 	c.finishEpoch(ctx, bus, sessionID, c.metrics.Reason())
 	return runErr
+}
+
+func converterError(direction string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("crosstalk %s conversion failed: %w", direction, err)
 }
 
 func (c *Crosstalk) failEpoch(err error) {
@@ -460,6 +472,7 @@ func (c *Crosstalk) setOutbound(sessionID string, outbound *media.Outbound) {
 	c.nextSeq = 0
 	c.sourceSeq = 0
 	c.eosSent = false
+	c.sinkSeq = 0
 	c.mu.Unlock()
 	if prev != nil {
 		_ = prev.Close()
@@ -470,6 +483,8 @@ func (c *Crosstalk) finishEpoch(ctx context.Context, bus qol.Bus, sessionID, rea
 	c.mu.Lock()
 	outbound := c.outbound
 	c.outbound = nil
+	c.epochCtx = nil
+	c.epochABC = nil
 	ready := c.epochReady
 	c.epochReady = false
 	c.activeSession = ""
@@ -484,6 +499,60 @@ func (c *Crosstalk) finishEpoch(ctx context.Context, bus qol.Bus, sessionID, rea
 	_ = c.publishEOS(ctx, bus, sessionID, reason)
 }
 
+// startOutboundLocked starts a fresh converter for the next sink stream. c.mu
+// must be held; the caller publishes the converter only after Start succeeds.
+func (c *Crosstalk) startOutboundLocked() error {
+	if c.epochCtx == nil || c.epochABC == nil {
+		return errors.New("crosstalk sink epoch is not active")
+	}
+	outbound, err := media.NewOutbound(media.OutboundConfig{
+		FFmpeg: c.cfg.FFmpeg, Codec: c.epochABCCodec(), Queue: c.cfg.Queue, Overflow: c.cfg.Overflow,
+	})
+	if err != nil {
+		return err
+	}
+	if err := outbound.Start(c.epochCtx); err != nil {
+		_ = outbound.Close()
+		return err
+	}
+	epochCtx := c.epochCtx
+	session := c.epochABC
+	c.outbound = outbound
+	go func() {
+		if err := c.forwardOutbound(epochCtx, session, outbound); err != nil && epochCtx.Err() == nil {
+			c.failEpoch(err)
+		}
+	}()
+	return nil
+}
+
+func (c *Crosstalk) epochABCCodec() media.Codec {
+	codec, ok := c.epochABC.NegotiatedCodec()
+	if !ok {
+		return media.Codec{MimeType: media.MimeTypeOpus, ClockRate: media.OpusClockRate, Channels: 1}
+	}
+	return codec
+}
+
+// finishSinkSessionLocked waits for the current stream's RTP to drain, then
+// atomically replaces it with a fresh converter. c.mu must be held.
+func (c *Crosstalk) finishSinkSessionLocked(outbound *media.Outbound) error {
+	err := outbound.Wait()
+	if c.outbound != outbound {
+		return nil
+	}
+	c.outbound = nil
+	c.activeSession = ""
+	c.nextSeq = 0
+	if err != nil && c.epochCtx.Err() == nil {
+		return err
+	}
+	if c.epochCtx.Err() != nil {
+		return nil
+	}
+	return c.startOutboundLocked()
+}
+
 func (c *Crosstalk) handleSink(_ context.Context, event qol.Event) error {
 	switch event.Type {
 	case qol.TypeAudioStream, qol.TypeAudioPCM, qol.TypeAudioPCMFinal:
@@ -492,14 +561,13 @@ func (c *Crosstalk) handleSink(_ context.Context, event qol.Event) error {
 		return nil
 	}
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	if !c.epochReady || c.outbound == nil {
-		c.mu.Unlock()
 		c.metrics.Dropped.Add(1)
 		return nil
 	}
 	if c.activeSession == "" {
 		if event.Seq != 0 {
-			c.mu.Unlock()
 			c.metrics.Dropped.Add(1)
 			return nil
 		}
@@ -507,23 +575,19 @@ func (c *Crosstalk) handleSink(_ context.Context, event qol.Event) error {
 		c.nextSeq = 0
 	}
 	if event.SessionID != c.activeSession {
-		c.mu.Unlock()
 		c.metrics.RejectedSessions.Add(1)
 		c.logger.Info("crosstalk rejected extra qol session", "stage", c.cfg.Name, "direction", "sink", "session", event.SessionID, "active", c.activeSession)
 		return nil
 	}
 	if event.Seq < c.nextSeq {
-		c.mu.Unlock()
 		c.metrics.Duplicates.Add(1)
 		return nil
 	}
 	if event.Seq != c.nextSeq {
-		c.mu.Unlock()
 		c.metrics.Dropped.Add(1)
 		c.logger.Info("crosstalk dropped non-contiguous sink event", "stage", c.cfg.Name, "expected", c.nextSeq, "got", event.Seq)
 		return nil
 	}
-	c.nextSeq++
 	end := event.Type == qol.TypeAudioPCMFinal
 	if event.Type == qol.TypeAudioStream {
 		_, _, streamEnd, _, err := wire.UnmarshalAudioStream(event.Payload)
@@ -531,20 +595,23 @@ func (c *Crosstalk) handleSink(_ context.Context, event qol.Event) error {
 			end = streamEnd
 		}
 	}
-	if end {
-		c.activeSession = ""
-		c.nextSeq = 0
-	}
-	outbound := c.outbound
-	c.mu.Unlock()
-	if err := outbound.WriteEvent(event); err != nil {
+	if err := c.outbound.WriteEvent(event); err != nil {
 		if errors.Is(err, media.ErrOverflow) {
 			dropped := c.metrics.Dropped.Add(1)
-			c.logger.Info("crosstalk overflow", "stage", c.cfg.Name, "direction", "sink", "dropped", dropped, "qol_session", c.Health().SessionID)
+			c.logger.Info("crosstalk overflow", "stage", c.cfg.Name, "direction", "sink", "dropped", dropped, "qol_session", c.health.SessionID)
 			return nil
 		}
 		c.metrics.SinkErrors.Add(1)
 		c.logger.Error("crosstalk sink write failed", "stage", c.cfg.Name, "err", err)
+		return err
+	}
+	c.nextSeq++
+	if !end {
+		return nil
+	}
+	if err := c.finishSinkSessionLocked(c.outbound); err != nil {
+		c.metrics.SinkErrors.Add(1)
+		c.logger.Error("crosstalk sink session ended with error", "stage", c.cfg.Name, "err", err)
 		return err
 	}
 	return nil
@@ -557,6 +624,10 @@ func (c *Crosstalk) forwardOutbound(ctx context.Context, session ABCSession, out
 			return nil
 		case frame, ok := <-outbound.Frames():
 			if !ok {
+				if err := outbound.Err(); err != nil && ctx.Err() == nil {
+					c.metrics.SinkErrors.Add(1)
+					return converterError("sink", err)
+				}
 				return nil
 			}
 			if frame.End {
@@ -565,7 +636,12 @@ func (c *Crosstalk) forwardOutbound(ctx context.Context, session ABCSession, out
 			if len(frame.Payload) == 0 {
 				continue
 			}
-			if err := session.WriteRTP(media.PackRTP(frame)); err != nil {
+			packet := media.PackRTP(frame)
+			c.sinkRTMu.Lock()
+			packet.SequenceNumber = c.sinkSeq
+			c.sinkSeq++
+			c.sinkRTMu.Unlock()
+			if err := session.WriteRTP(packet); err != nil {
 				c.metrics.SinkErrors.Add(1)
 				return fmt.Errorf("crosstalk write rtp: %w", err)
 			}
@@ -620,6 +696,9 @@ func (c *Crosstalk) publishInbound(ctx context.Context, bus qol.Bus, sessionID s
 			return nil
 		case chunk, ok := <-inbound.Chunks():
 			if !ok {
+				if err := inbound.Err(); err != nil && ctx.Err() == nil {
+					return converterError("source", err)
+				}
 				return nil
 			}
 			if chunk.End && len(chunk.Data) == 0 {
@@ -734,8 +813,5 @@ func isTemporaryNetErr(err error) bool {
 	var netErr net.Error
 	return errors.As(err, &netErr) && netErr.Timeout()
 }
-
-
-
 
 var _ qol.Stage = (*Crosstalk)(nil)

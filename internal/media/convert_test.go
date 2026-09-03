@@ -139,13 +139,88 @@ func TestEncodedStreamProducesOpusBeforeEOS(t *testing.T) {
 	}
 }
 
-func TestUnsupportedEncodedFails(t *testing.T) {
-	out, err := media.NewOutbound(media.OutboundConfig{Codec: media.Codec{MimeType: media.MimeTypeOpus, ClockRate: 48000, Channels: 1}})
+func TestEncodedInputMediaTypesProduceOpusTone(t *testing.T) {
+	requireFFmpeg(t)
+	for _, tc := range []struct {
+		name      string
+		mediaType string
+		container string
+		freq      float64
+	}{
+		{name: "ogg opus with normalized parameters", mediaType: "Audio/Ogg;Codecs=Opus", container: "ogg", freq: 440},
+		{name: "ogg alias", mediaType: "audio/ogg", container: "ogg", freq: 523},
+		{name: "mpeg", mediaType: "audio/mpeg", container: "mp3", freq: 660},
+		{name: "mp3 alias", mediaType: "audio/mp3", container: "mp3", freq: 880},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			encoded := encodedToneContainer(t, tc.container, tc.freq, 700*time.Millisecond)
+			out, err := media.NewOutbound(media.OutboundConfig{
+				Codec: media.Codec{MimeType: media.MimeTypeOpus, ClockRate: 48000, Channels: 1},
+				Queue: 256,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			if err := out.Start(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for offset, n := 0, 0; offset < len(encoded); offset += n {
+				n = []int{137, 911, 43, 2048, 307}[offset%5]
+				if n > len(encoded)-offset {
+					n = len(encoded) - offset
+				}
+				if err := out.WriteStream(tc.mediaType, encoded[offset:offset+n], offset+n == len(encoded)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			frames := collectFrames(t, out.Frames())
+			if err := out.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			if len(frames) == 0 {
+				t.Fatal("no RTP frames produced")
+			}
+			assertTone(t, decodeOpusFrames(t, frames, 16000, 1), 16000, tc.freq, 450*time.Millisecond)
+		})
+	}
+}
+
+func TestUnsupportedAndMalformedEncodedInputsFailBeforeQueueing(t *testing.T) {
+	out, err := media.NewOutbound(media.OutboundConfig{
+		Codec:    media.Codec{MimeType: media.MimeTypeOpus, ClockRate: 48000, Channels: 1},
+		Queue:    1,
+		Overflow: media.OverflowFail,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := out.WriteStream("application/pdf", []byte("%PDF"), false); !errors.Is(err, media.ErrUnsupportedMedia) {
-		t.Fatalf("got %v", err)
+	for _, mediaType := range []string{"", "application/pdf", "audio/opus", "audio/webm", "audio/ogg; codecs"} {
+		err := out.WriteStream(mediaType, []byte("not queued"), false)
+		if mediaType == "" || mediaType == "audio/ogg; codecs" {
+			if !errors.Is(err, media.ErrMalformedMedia) {
+				t.Fatalf("WriteStream(%q) error = %v, want malformed media", mediaType, err)
+			}
+		} else if !errors.Is(err, media.ErrUnsupportedMedia) {
+			t.Fatalf("WriteStream(%q) error = %v, want unsupported media", mediaType, err)
+		}
+	}
+	if err := out.WriteStream(media.MediaTypeOggOpus, []byte("queued"), false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEncodedMediaTypeChangeFails(t *testing.T) {
+	out, err := media.NewOutbound(media.OutboundConfig{Codec: media.Codec{MimeType: media.MimeTypeOpus, ClockRate: 48000, Channels: 1}, Queue: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := out.WriteStream(media.MediaTypeOggOpus, []byte("first"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := out.WriteStream("audio/mpeg", []byte("second"), true); !errors.Is(err, media.ErrFormatChanged) {
+		t.Fatalf("got %v, want format changed", err)
 	}
 }
 
@@ -254,6 +329,70 @@ func TestInboundOpusBecomesOggOpus(t *testing.T) {
 	}
 }
 
+func TestInboundOggSpansMatchDecodedDuration(t *testing.T) {
+	requireFFmpeg(t)
+	const duration = 300 * time.Millisecond
+	frames := opusFrames(t, 660, duration)
+	in, err := media.NewInbound(media.InboundConfig{
+		Codec:   media.Codec{MimeType: media.MimeTypeOpus, ClockRate: media.OpusClockRate, Channels: 1},
+		Profile: media.Profile{Kind: media.ProfileOggOpus},
+		Queue:   64,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if err := in.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, frame := range frames {
+		if err := in.WriteFrame(frame); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := in.WriteFrame(media.Frame{End: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	var encoded []byte
+	var cursor qol.MediaTime
+	seenHeader := false
+	for chunk := range in.Chunks() {
+		if chunk.End {
+			if chunk.Span.Start != cursor || chunk.Span.End != cursor {
+				t.Fatalf("EOS span = %#v, want cursor %v", chunk.Span, cursor)
+			}
+			break
+		}
+		if chunk.Span.Start != cursor || chunk.Span.End < chunk.Span.Start {
+			t.Fatalf("non-contiguous span %#v after %v", chunk.Span, cursor)
+		}
+		if bytes.Contains(chunk.Data, []byte("OpusHead")) {
+			seenHeader = true
+			if chunk.Span.End != chunk.Span.Start {
+				t.Fatalf("header page advanced clock: %#v", chunk.Span)
+			}
+		}
+		cursor = chunk.Span.End
+		encoded = append(encoded, chunk.Data...)
+	}
+	if !seenHeader {
+		t.Fatal("missing Opus header page")
+	}
+	decoded := decodeOggPCM(t, encoded, 16000)
+	decodedDuration := time.Duration(len(decoded)/2) * time.Second / 16000
+	// FFmpeg's UDP RTP input can discard the final packet while its Ogg output
+	// flushes the packet-duration clock. Allow one Opus packet for that
+	// transport boundary; granule timing itself remains sample-accurate.
+	if difference(cursor.Duration(), decodedDuration) > time.Duration(media.OpusFrameMs)*time.Millisecond {
+		t.Fatalf("final span = %v, decoded duration = %v", cursor.Duration(), decodedDuration)
+	}
+	if err := in.Close(); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
 func TestInboundLossIsObservable(t *testing.T) {
 	in, err := media.NewInbound(media.InboundConfig{
 		Codec:   media.Codec{MimeType: media.MimeTypeOpus, ClockRate: 48000, Channels: 1},
@@ -300,6 +439,22 @@ func TestOutboundCancellationReapsProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertNoOrphanFFmpeg(t)
+}
+
+func TestOutboundMissingExecutableReportsStartupAndCloseError(t *testing.T) {
+	out, err := media.NewOutbound(media.OutboundConfig{
+		FFmpeg: "definitely-not-a-qol-executable",
+		Codec:  media.Codec{MimeType: media.MimeTypeOpus, ClockRate: 48000, Channels: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := out.Start(context.Background()); err == nil {
+		t.Fatal("Start succeeded with a missing executable")
+	}
+	if err := out.Close(); err == nil {
+		t.Fatal("Close discarded the startup failure")
+	}
 }
 
 func TestConverterCrashCleansUp(t *testing.T) {
@@ -496,9 +651,22 @@ func tonePCM(t *testing.T, freq float64, rate, channels int, format qol.SampleFo
 }
 
 func encodedTone(t *testing.T, freq float64, duration time.Duration) []byte {
+	return encodedToneContainer(t, "ogg", freq, duration)
+}
+
+func encodedToneContainer(t *testing.T, container string, freq float64, duration time.Duration) []byte {
 	t.Helper()
-	cmd := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency="+strconv.Itoa(int(freq))+":duration="+strconv.FormatFloat(duration.Seconds(), 'f', 3, 64), "-c:a", "libopus", "-page_duration", "20000", "-f", "ogg", "pipe:1")
-	out, err := cmd.Output()
+	args := []string{"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=" + strconv.Itoa(int(freq)) + ":duration=" + strconv.FormatFloat(duration.Seconds(), 'f', 3, 64)}
+	switch container {
+	case "ogg":
+		args = append(args, "-c:a", "libopus", "-page_duration", "20000", "-f", "ogg")
+	case "mp3":
+		args = append(args, "-c:a", "libmp3lame", "-f", "mp3")
+	default:
+		t.Fatalf("unsupported test container %q", container)
+	}
+	args = append(args, "pipe:1")
+	out, err := exec.Command("ffmpeg", args...).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,6 +758,24 @@ func collectPCM(t *testing.T, chunks <-chan media.OutputChunk) []byte {
 			return out
 		}
 	}
+}
+
+func decodeOggPCM(t *testing.T, ogg []byte, rate int) []byte {
+	t.Helper()
+	cmd := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "ogg", "-i", "pipe:0", "-f", "s16le", "-ar", strconv.Itoa(rate), "-ac", "1", "pipe:1")
+	cmd.Stdin = bytes.NewReader(ogg)
+	pcm, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pcm
+}
+
+func difference(a, b time.Duration) time.Duration {
+	if a < b {
+		return b - a
+	}
+	return a - b
 }
 
 func decodeOpusFrames(t *testing.T, frames []media.Frame, rate, channels int) []byte {
@@ -701,5 +887,3 @@ func fft(a []complex128) {
 		}
 	}
 }
-
-

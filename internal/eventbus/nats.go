@@ -30,8 +30,15 @@ type subscription struct {
 	nats *nats.Subscription
 	done chan struct{}
 	once sync.Once
-	mu   sync.Mutex
-	err  error
+
+	mu       sync.Mutex
+	err      error
+	closeErr error
+
+	lifecycleMu sync.Mutex
+	terminated  bool
+	callbacks   int
+	doneClosed  bool
 }
 
 func New(connection *nats.Conn) (*Bus, error) {
@@ -84,13 +91,18 @@ func (b *Bus) Subscribe(ctx context.Context, channel string, opts qol.SubscribeO
 	}
 	result := &subscription{done: make(chan struct{})}
 	callback := func(message *nats.Msg) {
+		if !result.beginCallback() {
+			return
+		}
+		defer result.endCallback()
+
 		event, err := decode(message.Data)
 		if err != nil {
-			result.setError(err)
+			result.terminate(err)
 			return
 		}
 		if err := handler(ctx, event); err != nil {
-			result.setError(err)
+			result.terminate(err)
 		}
 	}
 	var err error
@@ -104,21 +116,17 @@ func (b *Bus) Subscribe(ctx context.Context, channel string, opts qol.SubscribeO
 	}
 	go func() {
 		<-ctx.Done()
-		result.setError(ctx.Err())
-		_ = result.Close()
+		result.terminate(ctx.Err())
 	}()
 	return result, nil
 }
 
 func (s *subscription) Close() error {
-	var err error
-	s.once.Do(func() {
-		if s.nats != nil {
-			err = s.nats.Unsubscribe()
-		}
-		close(s.done)
-	})
-	return err
+	s.terminate(nil)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closeErr
 }
 
 func (s *subscription) Done() <-chan struct{} {
@@ -131,11 +139,58 @@ func (s *subscription) Err() error {
 	return s.err
 }
 
-func (s *subscription) setError(err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !errors.Is(err, context.Canceled) {
-		s.err = err
+func (s *subscription) terminate(terminalErr error) {
+	if terminalErr != nil && !errors.Is(terminalErr, context.Canceled) {
+		s.mu.Lock()
+		if s.err == nil {
+			s.err = terminalErr
+		}
+		s.mu.Unlock()
+	}
+
+	s.lifecycleMu.Lock()
+	s.terminated = true
+	s.lifecycleMu.Unlock()
+
+	s.once.Do(func() {
+		var closeErr error
+		if s.nats != nil {
+			closeErr = s.nats.Unsubscribe()
+		}
+
+		s.mu.Lock()
+		s.closeErr = closeErr
+		s.mu.Unlock()
+		s.closeDoneWhenCallbacksFinish()
+	})
+}
+
+func (s *subscription) beginCallback() bool {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.terminated {
+		return false
+	}
+	s.callbacks++
+	return true
+}
+
+func (s *subscription) endCallback() {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.callbacks--
+	if s.terminated && s.callbacks == 0 && !s.doneClosed {
+		s.doneClosed = true
+		close(s.done)
+	}
+}
+
+func (s *subscription) closeDoneWhenCallbacksFinish() {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.callbacks == 0 && !s.doneClosed {
+		s.doneClosed = true
+		close(s.done)
 	}
 }
 

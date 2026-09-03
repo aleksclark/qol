@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	qol "github.com/aleksclark/qol"
@@ -21,17 +22,20 @@ type InboundConfig struct {
 }
 
 type Inbound struct {
-	cfg     InboundConfig
-	metrics *Metrics
-	queue   *Queue[Frame]
-	chunks  chan OutputChunk
-	cancel  context.CancelFunc
-	done    chan error
-	mu      sync.Mutex
-	lastSeq uint16
-	lastTS  uint32
-	haveSeq bool
-	closed  bool
+	cfg          InboundConfig
+	metrics      *Metrics
+	queue        *Queue[Frame]
+	chunks       chan OutputChunk
+	cancel       context.CancelFunc
+	ready        chan struct{}
+	done         chan struct{}
+	err          error
+	mu           sync.Mutex
+	lastSeq      uint16
+	lastTS       uint32
+	haveSeq      bool
+	closed       bool
+	outputCursor atomic.Int64
 }
 
 func NewInbound(cfg InboundConfig) (*Inbound, error) {
@@ -54,15 +58,45 @@ func NewInbound(cfg InboundConfig) (*Inbound, error) {
 
 func (i *Inbound) Metrics() *Metrics          { return i.metrics }
 func (i *Inbound) Chunks() <-chan OutputChunk { return i.chunks }
+func (i *Inbound) Ready() <-chan struct{}     { return i.ready }
+func (i *Inbound) Done() <-chan struct{}      { return i.done }
 
+// Start waits until FFmpeg has started and bound its RTP input. A nil result
+// means the converter is operational, not merely that its goroutine launched.
 func (i *Inbound) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	i.cancel = cancel
-	i.done = make(chan error, 1)
+	i.ready = make(chan struct{})
+	i.done = make(chan struct{})
+	i.outputCursor.Store(0)
 	go func() {
-		i.done <- i.decode(runCtx)
+		err := i.decode(runCtx)
+		i.mu.Lock()
+		i.err = err
+		i.mu.Unlock()
+		close(i.done)
 	}()
-	return nil
+	select {
+	case <-i.ready:
+		select {
+		case <-i.done:
+			return i.Err()
+		default:
+			return nil
+		}
+	case <-i.done:
+		return i.Err()
+	case <-ctx.Done():
+		cancel()
+		<-i.done
+		return ctx.Err()
+	}
+}
+
+func (i *Inbound) Err() error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.err
 }
 
 func (i *Inbound) WriteFrame(frame Frame) error {
@@ -114,7 +148,8 @@ func (i *Inbound) Close() error {
 	if i.done == nil {
 		return nil
 	}
-	return <-i.done
+	<-i.done
+	return i.Err()
 }
 
 func (i *Inbound) decode(ctx context.Context) error {
@@ -137,6 +172,7 @@ func (i *Inbound) decode(ctx context.Context) error {
 	if err := waitUDPBound(ctx, port); err != nil {
 		return wrapProcess(err, proc)
 	}
+	close(i.ready)
 	conn, err := net.Dial("udp", "127.0.0.1:"+strconv.Itoa(port))
 	if err != nil {
 		return err
@@ -172,7 +208,7 @@ func (i *Inbound) decode(ctx context.Context) error {
 	case <-time.After(2 * time.Second):
 	}
 	select {
-	case i.chunks <- OutputChunk{End: true}:
+	case i.chunks <- OutputChunk{End: true, Span: i.currentOutputSpan()}:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -215,6 +251,10 @@ type emitResult struct {
 }
 
 func (i *Inbound) emitOutput(ctx context.Context, stdout io.Reader) emitResult {
+	if i.cfg.Profile.Kind == ProfileOggOpus {
+		return i.emitOggOutput(ctx, stdout)
+	}
+
 	rate := i.cfg.Profile.SampleRate
 	if rate == 0 {
 		rate = OpusClockRate
@@ -225,15 +265,10 @@ func (i *Inbound) emitOutput(ctx context.Context, stdout io.Reader) emitResult {
 		n, err := stdout.Read(buf)
 		if n > 0 {
 			data := append([]byte(nil), buf[:n]...)
-			span := qol.Span{Start: cursor, End: cursor}
-			if i.cfg.Profile.Kind != ProfileOggOpus {
-				samples := n / max(1, i.cfg.Profile.Channels*BytesPerSample(i.cfg.Profile.SampleFormat()))
-				span = SpanFromSamples(cursor, samples, rate)
-				cursor = span.End
-			} else {
-				span.End = cursor + qol.MediaTime(time.Duration(OpusFrameMs)*time.Millisecond)
-				cursor = span.End
-			}
+			samples := n / max(1, i.cfg.Profile.Channels*BytesPerSample(i.cfg.Profile.SampleFormat()))
+			span := SpanFromSamples(cursor, samples, rate)
+			cursor = span.End
+			i.outputCursor.Store(int64(cursor))
 			i.metrics.FramesOut.Add(1)
 			select {
 			case i.chunks <- OutputChunk{Data: data, Span: span}:
@@ -248,6 +283,37 @@ func (i *Inbound) emitOutput(ctx context.Context, stdout io.Reader) emitResult {
 			return emitResult{cursor: cursor}
 		}
 	}
+}
+
+// emitOggOutput emits whole pages so each payload is independently framed at a
+// container boundary. Its spans use the Opus granule clock; headers and pages
+// without completed packets have zero duration.
+func (i *Inbound) emitOggOutput(ctx context.Context, stdout io.Reader) emitResult {
+	pages := oggPageReader{}
+	for {
+		page, granule, err := pages.readPage(stdout)
+		if len(page) > 0 {
+			span := pages.span(page, granule)
+			i.outputCursor.Store(int64(pages.cursor))
+			i.metrics.FramesOut.Add(1)
+			select {
+			case i.chunks <- OutputChunk{Data: page, Span: span}:
+			case <-ctx.Done():
+				return emitResult{cursor: pages.cursor, err: ctx.Err()}
+			}
+		}
+		if err != nil {
+			if err != io.EOF && ctx.Err() == nil {
+				return emitResult{cursor: pages.cursor, err: err}
+			}
+			return emitResult{cursor: pages.cursor}
+		}
+	}
+}
+
+func (i *Inbound) currentOutputSpan() qol.Span {
+	cursor := qol.MediaTime(i.outputCursor.Load())
+	return qol.Span{Start: cursor, End: cursor}
 }
 
 func inboundArgs(profile Profile) []string {

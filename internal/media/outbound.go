@@ -29,19 +29,23 @@ type Outbound struct {
 	queue   *Queue[outboundItem]
 	frames  chan Frame
 	cancel  context.CancelFunc
-	done    chan error
+	ready   chan struct{}
+	done    chan struct{}
+	err     error
 	mu      sync.Mutex
 	format  qol.PCMFormat
 	hasPCM  bool
+	encoded EncodedInput
 	closed  bool
 }
 
 type outboundItem struct {
-	data   []byte
-	format qol.PCMFormat
-	kind   ProfileKind
-	span   qol.Span
-	end    bool
+	data    []byte
+	format  qol.PCMFormat
+	kind    ProfileKind
+	encoded EncodedInput
+	span    qol.Span
+	end     bool
 }
 
 func NewOutbound(cfg OutboundConfig) (*Outbound, error) {
@@ -59,16 +63,39 @@ func NewOutbound(cfg OutboundConfig) (*Outbound, error) {
 	}, nil
 }
 
-func (o *Outbound) Metrics() *Metrics { return o.metrics }
+func (o *Outbound) Metrics() *Metrics      { return o.metrics }
+func (o *Outbound) Ready() <-chan struct{} { return o.ready }
+func (o *Outbound) Done() <-chan struct{}  { return o.done }
 
+// Start verifies that FFmpeg can actually execute before accepting media. The
+// encoder itself starts with the first event because its input format is part
+// of that event.
 func (o *Outbound) Start(ctx context.Context) error {
+	if err := probeProcess(ctx, o.cfg.FFmpeg); err != nil {
+		o.mu.Lock()
+		o.err = err
+		o.mu.Unlock()
+		return err
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	o.cancel = cancel
-	o.done = make(chan error, 1)
+	o.ready = make(chan struct{})
+	o.done = make(chan struct{})
+	close(o.ready)
 	go func() {
-		o.done <- o.encode(runCtx)
+		err := o.encode(runCtx)
+		o.mu.Lock()
+		o.err = err
+		o.mu.Unlock()
+		close(o.done)
 	}()
 	return nil
+}
+
+func (o *Outbound) Err() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.err
 }
 
 func (o *Outbound) WriteEvent(event qol.Event) error {
@@ -87,13 +114,14 @@ func (o *Outbound) WritePCM(audio qol.Audio, span qol.Span, end bool) error {
 }
 
 func (o *Outbound) WriteStream(mediaType string, data []byte, end bool) error {
-	if mediaType == "" || (len(data) == 0 && !end) {
+	if len(data) == 0 && !end {
 		return ErrMalformedMedia
 	}
-	if !supportedEncoded(mediaType) {
-		return fmt.Errorf("%w: %s", ErrUnsupportedMedia, mediaType)
+	encoded, err := ParseEncodedInputMediaType(mediaType)
+	if err != nil {
+		return err
 	}
-	return o.enqueue(outboundItem{data: append([]byte(nil), data...), kind: ProfileOggOpus, end: end})
+	return o.enqueue(outboundItem{data: append([]byte(nil), data...), encoded: encoded, end: end})
 }
 
 func (o *Outbound) Frames() <-chan Frame { return o.frames }
@@ -110,10 +138,20 @@ func (o *Outbound) Close() error {
 	if o.cancel != nil {
 		o.cancel()
 	}
+	return o.Wait()
+}
+
+// Wait waits for an EOS-terminated stream to finish producing RTP frames.
+// Callers must not call Wait concurrently with Close.
+func (o *Outbound) Wait() error {
 	if o.done == nil {
-		return nil
+		return o.Err()
 	}
-	return <-o.done
+	<-o.done
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.closed = true
+	return o.err
 }
 
 func (o *Outbound) enqueue(item outboundItem) error {
@@ -122,15 +160,18 @@ func (o *Outbound) enqueue(item outboundItem) error {
 		o.mu.Unlock()
 		return ErrClosed
 	}
-	if item.kind != ProfileOggOpus {
-		if o.hasPCM && !SamePCMFormat(o.format, item.format) && len(item.data) > 0 {
+	if item.encoded.MediaType != "" {
+		if o.hasPCM || (o.encoded.MediaType != "" && o.encoded.MediaType != item.encoded.MediaType) {
 			o.mu.Unlock()
 			return ErrFormatChanged
 		}
-		if len(item.data) > 0 {
-			o.format = item.format
-			o.hasPCM = true
-		}
+		o.encoded = item.encoded
+	} else if o.encoded.MediaType != "" || (o.hasPCM && !SamePCMFormat(o.format, item.format) && len(item.data) > 0) {
+		o.mu.Unlock()
+		return ErrFormatChanged
+	} else if len(item.data) > 0 {
+		o.format = item.format
+		o.hasPCM = true
 	}
 	o.mu.Unlock()
 	if err := o.queue.Push(item); err != nil {
@@ -195,7 +236,7 @@ func (o *Outbound) pipe(ctx context.Context, first outboundItem) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	if waitErr := proc.Wait(); waitErr != nil && o.metrics.FramesOut.Load() == 0 {
+	if waitErr := proc.Wait(); waitErr != nil {
 		o.metrics.ProcessExits.Add(1)
 		return wrapProcess(waitErr, proc)
 	}
@@ -224,7 +265,7 @@ func (o *Outbound) feed(proc *process, first outboundItem) error {
 		if !ok {
 			return proc.stdin.Close()
 		}
-		if item.kind != ProfileOggOpus && first.kind != ProfileOggOpus && !SamePCMFormat(first.format, item.format) && len(item.data) > 0 {
+		if !sameOutboundFormat(first, item) {
 			return ErrFormatChanged
 		}
 		if len(item.data) > 0 {
@@ -291,8 +332,8 @@ func (o *Outbound) collectRTP(ctx context.Context, listener net.PacketConn, fed 
 
 func outboundArgs(item outboundItem, rtpURL string) []string {
 	args := []string{"-hide_banner", "-loglevel", "error", "-fflags", "+nobuffer"}
-	if item.kind == ProfileOggOpus {
-		args = append(args, "-probesize", "2048", "-analyzeduration", "0", "-f", "ogg")
+	if item.encoded.MediaType != "" {
+		args = append(args, "-probesize", "2048", "-analyzeduration", "0", "-f", item.encoded.Demuxer)
 	} else {
 		format := "s16le"
 		if item.format.Format == qol.SampleF32LE {
@@ -332,10 +373,14 @@ func decodeOutbound(event qol.Event) (outboundItem, error) {
 		if err != nil {
 			return outboundItem{}, err
 		}
-		if !supportedEncoded(mediaType) {
-			return outboundItem{}, fmt.Errorf("%w: %s", ErrUnsupportedMedia, mediaType)
+		encoded, err := ParseEncodedInputMediaType(mediaType)
+		if err != nil {
+			return outboundItem{}, err
 		}
-		return outboundItem{data: data, kind: ProfileOggOpus, span: event.Span, end: end}, nil
+		if len(data) == 0 && !end {
+			return outboundItem{}, ErrMalformedMedia
+		}
+		return outboundItem{data: data, encoded: encoded, span: event.Span, end: end}, nil
 	default:
 		return outboundItem{}, fmt.Errorf("%w: %s", ErrUnsupportedMedia, event.Type)
 	}
@@ -348,13 +393,11 @@ func pcmKind(format qol.SampleFormat) ProfileKind {
 	return ProfilePCMS16LE
 }
 
-func supportedEncoded(mediaType string) bool {
-	switch mediaType {
-	case MediaTypeOggOpus, "audio/ogg", "audio/opus", "audio/mpeg", "audio/mp3", "audio/webm", "audio/webm;codecs=opus":
-		return true
-	default:
-		return false
+func sameOutboundFormat(first, item outboundItem) bool {
+	if first.encoded.MediaType != "" || item.encoded.MediaType != "" {
+		return first.encoded.MediaType != "" && first.encoded.MediaType == item.encoded.MediaType
 	}
+	return len(item.data) == 0 || SamePCMFormat(first.format, item.format)
 }
 
 func PackRTP(frame Frame) *rtp.Packet {

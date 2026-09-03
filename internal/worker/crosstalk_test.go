@@ -40,7 +40,9 @@ func TestCrosstalkSpecRejectsSelfLoopAndEmpty(t *testing.T) {
 		Name:          "bridge",
 		OutputChannel: "graph.crosstalk.out",
 		OutputProfile: media.Profile{Kind: media.ProfilePCMS16LE, SampleRate: 16000, Channels: 1},
-		Dial:          func(context.Context, worker.CrosstalkConfig) (worker.ABCSession, error) { return nil, errors.New("unused") },
+		Dial: func(context.Context, worker.CrosstalkConfig) (worker.ABCSession, error) {
+			return nil, errors.New("unused")
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +53,9 @@ func TestCrosstalkSpecRejectsSelfLoopAndEmpty(t *testing.T) {
 	}
 	stage, err = worker.NewCrosstalk(worker.CrosstalkConfig{
 		InputChannel: "graph.tts.audio",
-		Dial:         func(context.Context, worker.CrosstalkConfig) (worker.ABCSession, error) { return nil, errors.New("unused") },
+		Dial: func(context.Context, worker.CrosstalkConfig) (worker.ABCSession, error) {
+			return nil, errors.New("unused")
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -174,6 +178,82 @@ func TestCrosstalkSinksEncodedCapture(t *testing.T) {
 	cancel()
 	<-errc
 	assertTone(t, decodeFrames(t, frames, 16000), 16000, 440, 400*time.Millisecond)
+}
+
+func TestCrosstalkSinksSequentialPCMSessions(t *testing.T) {
+	requireFFmpeg(t)
+	bus := newOptionBus()
+	session := newFakeSession(t, "sess-sequential-pcm", "peer-sequential", 6)
+	stage := mustCrosstalk(t, worker.CrosstalkConfig{Name: "crosstalk", InputChannel: "graph.sink", Dial: onceDial(session)})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := runStage(ctx, stage, bus)
+	waitEpoch(t, stage)
+
+	publishPCM(t, bus, "graph.sink", "pcm-a", 16000, tonePCM(t, 440, 16000, 1, qol.SampleS16LE, 300*time.Millisecond), true)
+	first := session.Collect(t, 10*time.Second)
+	publishPCM(t, bus, "graph.sink", "pcm-b", 16000, tonePCM(t, 880, 16000, 1, qol.SampleS16LE, 300*time.Millisecond), true)
+	second := session.Collect(t, 10*time.Second)
+
+	session.Close()
+	cancel()
+	<-errc
+	assertTone(t, decodeFrames(t, first, 16000), 16000, 440, 180*time.Millisecond)
+	assertTone(t, decodeFrames(t, second, 16000), 16000, 880, 180*time.Millisecond)
+	if stage.Metrics().Epochs.Load() != 1 {
+		t.Fatalf("epochs = %d, want one uninterrupted epoch", stage.Metrics().Epochs.Load())
+	}
+}
+
+func TestCrosstalkSinksSequentialEncodedSessions(t *testing.T) {
+	requireFFmpeg(t)
+	bus := newOptionBus()
+	session := newFakeSession(t, "sess-sequential-encoded", "peer-sequential", 7)
+	stage := mustCrosstalk(t, worker.CrosstalkConfig{Name: "crosstalk", InputChannel: "graph.sink", Dial: onceDial(session)})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := runStage(ctx, stage, bus)
+	waitEpoch(t, stage)
+
+	firstOgg := encodedTone(t, 440, 500*time.Millisecond)
+	publishStream(t, bus, "graph.sink", "encoded-a", 0, firstOgg, true)
+	first := session.Collect(t, 10*time.Second)
+	secondOgg := encodedTone(t, 880, 500*time.Millisecond)
+	publishStream(t, bus, "graph.sink", "encoded-b", 0, secondOgg, true)
+	second := session.Collect(t, 10*time.Second)
+
+	session.Close()
+	cancel()
+	<-errc
+	assertTone(t, decodeFrames(t, first, 16000), 16000, 440, 250*time.Millisecond)
+	assertTone(t, decodeFrames(t, second, 16000), 16000, 880, 250*time.Millisecond)
+	if stage.Metrics().Epochs.Load() != 1 {
+		t.Fatalf("epochs = %d, want one uninterrupted epoch", stage.Metrics().Epochs.Load())
+	}
+}
+
+func TestCrosstalkSinkRejectsOverlappingSession(t *testing.T) {
+	requireFFmpeg(t)
+	bus := newOptionBus()
+	session := newFakeSession(t, "sess-overlap", "peer-overlap", 8)
+	stage := mustCrosstalk(t, worker.CrosstalkConfig{Name: "crosstalk", InputChannel: "graph.sink", Dial: onceDial(session)})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := runStage(ctx, stage, bus)
+	waitEpoch(t, stage)
+
+	publishPCMSeq(t, bus, "graph.sink", "active", 0, 16000, tonePCM(t, 440, 16000, 1, qol.SampleS16LE, 200*time.Millisecond), false)
+	publishPCM(t, bus, "graph.sink", "rejected", 16000, tonePCM(t, 880, 16000, 1, qol.SampleS16LE, 200*time.Millisecond), true)
+	publishPCMSeq(t, bus, "graph.sink", "active", 1, 16000, tonePCM(t, 440, 16000, 1, qol.SampleS16LE, 100*time.Millisecond), true)
+	frames := session.Collect(t, 10*time.Second)
+
+	session.Close()
+	cancel()
+	<-errc
+	assertTone(t, decodeFrames(t, frames, 16000), 16000, 440, 220*time.Millisecond)
+	if stage.Metrics().RejectedSessions.Load() != 1 {
+		t.Fatalf("rejected sessions = %d, want 1", stage.Metrics().RejectedSessions.Load())
+	}
 }
 
 func TestCrosstalkDuplexIndependent(t *testing.T) {
@@ -376,6 +456,84 @@ func TestCrosstalkRetriesTransientDialThenReady(t *testing.T) {
 	}
 	cancel()
 	<-errc
+}
+
+func TestCrosstalkSinkStartupFailureNeverReportsReady(t *testing.T) {
+	bus := newOptionBus()
+	session := newFakeSession(t, "sink-start", "peer", 1)
+	stage := mustCrosstalk(t, worker.CrosstalkConfig{
+		Name: "crosstalk", InputChannel: "graph.sink", FFmpeg: "definitely-not-a-qol-executable",
+		Dial: onceDial(session),
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err := <-runStage(ctx, stage, bus)
+	if err == nil {
+		t.Fatal("stage succeeded with a missing converter")
+	}
+	if health := stage.Health(); health.Ready || health.Reason != "conversion-failure" {
+		t.Fatalf("health = %#v, want non-ready conversion failure", health)
+	}
+}
+
+func TestCrosstalkSourceStartupFailureNeverReportsReady(t *testing.T) {
+	bus := newOptionBus()
+	session := newFakeSession(t, "source-start", "peer", 1)
+	stage := mustCrosstalk(t, worker.CrosstalkConfig{
+		Name: "crosstalk", OutputChannel: "graph.source",
+		OutputProfile: media.Profile{Kind: media.ProfilePCMS16LE, SampleRate: 16000, Channels: 1},
+		FFmpeg:        "definitely-not-a-qol-executable", Dial: onceDial(session),
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err := <-runStage(ctx, stage, bus)
+	if err == nil {
+		t.Fatal("stage succeeded with a missing converter")
+	}
+	if health := stage.Health(); health.Ready || health.Reason != "conversion-failure" {
+		t.Fatalf("health = %#v, want non-ready conversion failure", health)
+	}
+}
+
+func TestCrosstalkSinkConverterExitRestartsEpoch(t *testing.T) {
+	bus := newOptionBus()
+	first := newFakeSession(t, "runtime-one", "peer", 1)
+	second := newFakeSession(t, "runtime-two", "peer", 2)
+	var attempts atomic.Uint32
+	stage := mustCrosstalk(t, worker.CrosstalkConfig{
+		Name: "crosstalk", InputChannel: "graph.sink", FFmpeg: "false", Reconnect: true,
+		MinBackoff: time.Millisecond, MaxBackoff: 5 * time.Millisecond,
+		Dial: func(context.Context, worker.CrosstalkConfig) (worker.ABCSession, error) {
+			if attempts.Add(1) == 1 {
+				return first, nil
+			}
+			return second, nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errch := runStage(ctx, stage, bus)
+	waitEpoch(t, stage)
+	publishPCM(t, bus, "graph.sink", "runtime", 16000, tonePCM(t, 440, 16000, 1, qol.SampleS16LE, 20*time.Millisecond), true)
+	deadline := time.Now().Add(3 * time.Second)
+	for attempts.Load() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("epoch was not restarted: health=%#v", stage.Health())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if first.Err() != nil {
+		t.Fatalf("first session error = %v", first.Err())
+	}
+	if stage.Metrics().SinkErrors.Load() == 0 {
+		t.Fatal("sink conversion failure was not counted")
+	}
+	cancel()
+	select {
+	case <-errch:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stage did not stop")
+	}
 }
 
 func TestCrosstalkUnassignedDoesNotPublish(t *testing.T) {
@@ -614,13 +772,13 @@ type waitSession struct {
 	once    sync.Once
 }
 
-func (s *waitSession) Welcome() worker.ABCWelcome                 { return s.welcome }
-func (s *waitSession) NegotiatedCodec() (media.Codec, bool)       { return media.Codec{}, false }
-func (s *waitSession) WriteRTP(*rtp.Packet) error                 { return nil }
-func (s *waitSession) OnTrack(func(worker.ABCTrack))              {}
-func (s *waitSession) OnClose(func(string))                       {}
-func (s *waitSession) Done() <-chan struct{}                      { return s.done }
-func (s *waitSession) Err() error                                 { return nil }
+func (s *waitSession) Welcome() worker.ABCWelcome           { return s.welcome }
+func (s *waitSession) NegotiatedCodec() (media.Codec, bool) { return media.Codec{}, false }
+func (s *waitSession) WriteRTP(*rtp.Packet) error           { return nil }
+func (s *waitSession) OnTrack(func(worker.ABCTrack))        {}
+func (s *waitSession) OnClose(func(string))                 {}
+func (s *waitSession) Done() <-chan struct{}                { return s.done }
+func (s *waitSession) Err() error                           { return nil }
 func (s *waitSession) Close() error {
 	s.once.Do(func() { close(s.done) })
 	return nil

@@ -11,13 +11,13 @@ import (
 )
 
 const (
-	OpusClockRate     = 48000
-	OpusFrameMs       = 20
-	OpusFrameSamples  = OpusClockRate * OpusFrameMs / 1000
-	MaxOpusChannels   = 2
+	OpusClockRate      = 48000
+	OpusFrameMs        = 20
+	OpusFrameSamples   = OpusClockRate * OpusFrameMs / 1000
+	MaxOpusChannels    = 2
 	DefaultPayloadType = 111
-	MimeTypeOpus      = "audio/opus"
-	MediaTypeOggOpus  = "audio/ogg; codecs=opus"
+	MimeTypeOpus       = "audio/opus"
+	MediaTypeOggOpus   = "audio/ogg; codecs=opus"
 )
 
 type ProfileKind string
@@ -64,19 +64,19 @@ type OutputChunk struct {
 }
 
 type Metrics struct {
-	FramesIn         atomic.Uint64
-	FramesOut        atomic.Uint64
-	Dropped          atomic.Uint64
-	LatePackets      atomic.Uint64
-	Discontinuities  atomic.Uint64
-	Resets           atomic.Uint64
-	ProcessExits     atomic.Uint64
+	FramesIn        atomic.Uint64
+	FramesOut       atomic.Uint64
+	Dropped         atomic.Uint64
+	LatePackets     atomic.Uint64
+	Discontinuities atomic.Uint64
+	Resets          atomic.Uint64
+	ProcessExits    atomic.Uint64
 }
 
 var (
 	ErrUnsupportedCodec = errors.New("unsupported negotiated codec")
 	ErrUnsupportedMedia = errors.New("unsupported media format")
-	ErrFormatChanged    = errors.New("pcm format changed mid-stream")
+	ErrFormatChanged    = errors.New("media format changed mid-stream")
 	ErrOverflow         = errors.New("media queue overflow")
 	ErrClosed           = errors.New("converter closed")
 	ErrMalformedMedia   = errors.New("malformed media")

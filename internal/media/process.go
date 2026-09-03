@@ -81,3 +81,16 @@ func (p *process) Error() error {
 	}
 	return fmt.Errorf("%w: %s", err, detail)
 }
+
+// probeProcess proves that the configured executable can start without
+// exposing its command line or stderr to health callers.
+func probeProcess(ctx context.Context, binary string) error {
+	proc, err := startProcess(ctx, binary, "-version")
+	if err != nil {
+		return err
+	}
+	// Process creation is the readiness contract. Its terminal state belongs to
+	// the actual conversion and is exposed through Done and Err.
+	proc.Kill()
+	return nil
+}
