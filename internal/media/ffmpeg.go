@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 )
 
@@ -22,7 +23,7 @@ func NewDecoder(binary string) *Decoder {
 }
 
 func (d *Decoder) Start(ctx context.Context) (io.WriteCloser, io.ReadCloser, func() error, error) {
-	command := exec.CommandContext(ctx, d.binary, "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1")
+	command := exec.CommandContext(ctx, d.binary, "-hide_banner", "-loglevel", "error", "-fflags", "+nobuffer", "-probesize", "32768", "-analyzeduration", "0", "-i", "pipe:0", "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1")
 	input, err := command.StdinPipe()
 	if err != nil {
 		return nil, nil, nil, err
@@ -31,6 +32,7 @@ func (d *Decoder) Start(ctx context.Context) (io.WriteCloser, io.ReadCloser, fun
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	command.Stderr = os.Stderr
 	if err := command.Start(); err != nil {
 		return nil, nil, nil, fmt.Errorf("start ffmpeg: %w", err)
 	}

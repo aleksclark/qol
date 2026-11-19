@@ -57,7 +57,7 @@ tasks:
           attempts=$((attempts + 1))
           if [ "$attempts" -ge 60 ]; then
             {{.DEV_COMPOSE}} ps -a
-            {{.DEV_COMPOSE}} logs --no-color --tail=100 qol-api capture stt-whisper translate tts record-en record-es
+            {{.DEV_COMPOSE}} logs --no-color --tail=100 qol-api capture stt-whisper prosody translate tts record-en record-es
             exit 1
           fi
           sleep 1

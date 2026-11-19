@@ -17,7 +17,7 @@ func NewCapture() *Capture {
 		spec: qol.StageSpec{
 			Name:    "capture",
 			Inputs:  []qol.Port{{Name: "input", Channel: qol.ChannelCaptureInput, Types: []string{qol.TypeAudioStream}}},
-			Outputs: []qol.Port{{Name: "output", Channel: qol.ChannelCaptureOutput, Types: []string{qol.TypeAudioStream}}, {Name: "stt", Channel: qol.ChannelAudioInput, Types: []string{qol.TypeAudioStream}}, {Name: "record-en", Channel: qol.ChannelRecordENInput, Types: []string{qol.TypeAudioStream}}},
+			Outputs: []qol.Port{{Name: "output", Channel: qol.ChannelCaptureOutput, Types: []string{qol.TypeAudioStream}}, {Name: "stt", Channel: qol.ChannelAudioInput, Types: []string{qol.TypeAudioStream}}, {Name: "record-en", Channel: qol.ChannelRecordENInput, Types: []string{qol.TypeAudioStream}}, {Name: "prosody", Channel: qol.ChannelProsodyAudio, Types: []string{qol.TypeAudioStream}}},
 		},
 		group: "qol-capture",
 	}

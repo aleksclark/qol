@@ -47,6 +47,7 @@ message TextPayload {
   string language = 3;
   string speaker = 4;
   float confidence = 5;
+  ProsodyPayload prosody = 6;
 }
 
 message ProsodyPayload {
@@ -54,6 +55,17 @@ message ProsodyPayload {
   float energy = 2;
   float rate = 3;
   float emphasis = 4;
+  float pitch_range_semitones = 5;
+  float relative_pitch_semitones = 6;
+  float relative_energy_db = 7;
+  float relative_rate = 8;
+  float arousal = 9;
+  uint32 pause_before_ms = 10;
+  float voiced_ratio = 11;
+  float speech_seconds = 12;
+  string emotion = 13;
+  float emotion_confidence = 14;
+  repeated string markers = 15;
 }
 
 message SpeakerPayload {
@@ -66,6 +78,7 @@ message TranslationPayload {
   string source_language = 2;
   string target_language = 3;
   bool final = 4;
+  ProsodyPayload prosody = 5;
 }
 
 message StoredAudioPayload {

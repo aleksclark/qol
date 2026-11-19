@@ -23,6 +23,15 @@ services:
     command: ["run", "--type", "capture", "--nats-url", "nats://nats:4222"]
     depends_on:
       - nats
+  prosody:
+    build:
+      context: .
+      dockerfile: docker/go.Dockerfile
+      args:
+        COMMAND: qol-worker
+    command: ["run", "--type", "prosody", "--nats-url", "nats://nats:4222"]
+    depends_on:
+      - nats
   record-en:
     build:
       context: .
@@ -32,7 +41,6 @@ services:
     command: ["run", "--type", "record", "--name", "record-en", "--input", "graph.record-en.input", "--output", "graph.record-en.completed", "--nats-url", "nats://nats:4222", "--output-dir", "/output"]
     tmpfs:
       - /output
-      - /tmp/qol
     depends_on:
       - nats
   record-es:
@@ -44,7 +52,6 @@ services:
     command: ["run", "--type", "record", "--name", "record-es", "--input", "graph.record-es.input", "--output", "graph.record-es.completed", "--nats-url", "nats://nats:4222", "--output-dir", "/output"]
     tmpfs:
       - /output
-      - /tmp/qol
     depends_on:
       - nats
   web:

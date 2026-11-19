@@ -100,7 +100,10 @@ func MarshalText(value qol.Text) ([]byte, error) {
 	if value.Text == "" || value.Language == "" {
 		return nil, errors.New("text and language are required")
 	}
-	return proto.Marshal(&qolv1.TextPayload{Text: value.Text, Final: value.Final, Language: value.Language, Speaker: value.Speaker, Confidence: value.Confidence})
+	if err := ValidateProsody(value.Prosody); err != nil {
+		return nil, err
+	}
+	return proto.Marshal(&qolv1.TextPayload{Text: value.Text, Final: value.Final, Language: value.Language, Speaker: value.Speaker, Confidence: value.Confidence, Prosody: ProsodyToProto(value.Prosody)})
 }
 
 func UnmarshalText(payload []byte) (qol.Text, error) {
@@ -108,18 +111,21 @@ func UnmarshalText(payload []byte) (qol.Text, error) {
 	if err := proto.Unmarshal(payload, message); err != nil {
 		return qol.Text{}, err
 	}
-	value := qol.Text{Text: message.Text, Final: message.Final, Language: message.Language, Speaker: message.Speaker, Confidence: message.Confidence}
+	value := qol.Text{Text: message.Text, Final: message.Final, Language: message.Language, Speaker: message.Speaker, Confidence: message.Confidence, Prosody: ProsodyFromProto(message.Prosody)}
 	if value.Text == "" || value.Language == "" {
 		return qol.Text{}, errors.New("text and language are required")
 	}
-	return value, nil
+	return value, ValidateProsody(value.Prosody)
 }
 
 func MarshalTranslation(value qol.Translation) ([]byte, error) {
 	if value.Text == "" || value.SourceLanguage == "" || value.TargetLanguage == "" {
 		return nil, errors.New("translation text and languages are required")
 	}
-	return proto.Marshal(&qolv1.TranslationPayload{Text: value.Text, SourceLanguage: value.SourceLanguage, TargetLanguage: value.TargetLanguage, Final: value.Final})
+	if err := ValidateProsody(value.Prosody); err != nil {
+		return nil, err
+	}
+	return proto.Marshal(&qolv1.TranslationPayload{Text: value.Text, SourceLanguage: value.SourceLanguage, TargetLanguage: value.TargetLanguage, Final: value.Final, Prosody: ProsodyToProto(value.Prosody)})
 }
 
 func UnmarshalTranslation(payload []byte) (qol.Translation, error) {
@@ -127,11 +133,11 @@ func UnmarshalTranslation(payload []byte) (qol.Translation, error) {
 	if err := proto.Unmarshal(payload, message); err != nil {
 		return qol.Translation{}, err
 	}
-	value := qol.Translation{Text: message.Text, SourceLanguage: message.SourceLanguage, TargetLanguage: message.TargetLanguage, Final: message.Final}
+	value := qol.Translation{Text: message.Text, SourceLanguage: message.SourceLanguage, TargetLanguage: message.TargetLanguage, Final: message.Final, Prosody: ProsodyFromProto(message.Prosody)}
 	if value.Text == "" || value.SourceLanguage == "" || value.TargetLanguage == "" {
 		return qol.Translation{}, errors.New("translation text and languages are required")
 	}
-	return value, nil
+	return value, ValidateProsody(value.Prosody)
 }
 
 func MarshalStoredAudio(value qol.StoredAudio) ([]byte, error) {

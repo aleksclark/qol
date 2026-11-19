@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package qol.v1;
+
+option go_package = "github.com/aleksclark/qol/gen/qol/v1;qolv1";
+
+import "qol/v1/qol.proto";
+
+message RecognizedUtterance {
+  MediaSpan span = 1;
+  string text = 2;
+}
+
+message SynthesisRequest {
+  string text = 1;
+  string language = 2;
+  ProsodyPayload prosody = 3;
+}
+
+message SynthesisChunk {
+  PcmFormat format = 1;
+  bytes data = 2;
+  bool end_of_utterance = 3;
+}

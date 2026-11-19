@@ -12,11 +12,12 @@ ENV QOL_PROCESSOR_ARG=/processors/translate_en_es.py
 ENV QOL_TRANSLATE_MODEL=/models/opus-mt-en-es-ct2
 ENV HF_HOME=/models/huggingface
 
-COPY e2e/processors/translate_en_es.py /processors/translate_en_es.py
 RUN python3 -c "from huggingface_hub import snapshot_download; snapshot_download('Helsinki-NLP/opus-mt-en-es')" \
     && model=$(find /models/huggingface -type d -path '*/snapshots/*' | head -n 1) \
     && test -n "$model" \
     && ct2-transformers-converter --model "$model" --output_dir /models/opus-mt-en-es-ct2 --quantization int8
 ENV HF_HUB_OFFLINE=1
+
+COPY e2e/processors /processors
 
 WORKDIR /app

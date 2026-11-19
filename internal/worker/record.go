@@ -4,16 +4,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	qol "github.com/aleksclark/qol"
 	"github.com/aleksclark/qol/internal/wire"
 )
 
-func NewRecord(name, input, output string, store StreamAudioStore, spoolDir string) *Record {
+type Record struct {
+	spec           qol.StageSpec
+	group          string
+	store          StreamAudioStore
+	now            func() time.Time
+	processContext context.Context
+	mu             sync.Mutex
+	streams        map[string]*streamState
+}
+
+func NewRecord(name, input, output string, store StreamAudioStore) *Record {
 	return &Record{
-		spec:     qol.StageSpec{Name: name, Inputs: []qol.Port{{Name: "audio", Channel: input, Types: []string{qol.TypeAudioStream, qol.TypeAudioPCM, qol.TypeAudioPCMFinal}}}, Outputs: []qol.Port{{Name: "completed", Channel: output, Types: []string{qol.TypeStoredAudio}}}},
-		group:    "qol-" + name, store: store, spoolDir: spoolDir, now: time.Now, streams: make(map[string]*streamState),
+		spec:  qol.StageSpec{Name: name, Inputs: []qol.Port{{Name: "audio", Channel: input, Types: []string{qol.TypeAudioStream, qol.TypeAudioPCM, qol.TypeAudioPCMFinal}}}, Outputs: []qol.Port{{Name: "completed", Channel: output, Types: []string{qol.TypeStoredAudio}}}},
+		group: "qol-" + name, store: store, now: time.Now, streams: make(map[string]*streamState),
 	}
 }
 

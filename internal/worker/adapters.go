@@ -22,20 +22,6 @@ func NewCommandProcessor(command string, args ...string) *CommandProcessor {
 	return &CommandProcessor{command: command, args: append([]string(nil), args...)}
 }
 
-func (p *CommandProcessor) Process(ctx context.Context, input io.Reader, output io.Writer) error {
-	if p.command == "" {
-		return errors.New("processor command is required")
-	}
-	command := exec.CommandContext(ctx, p.command, p.args...)
-	command.Stdin = input
-	command.Stdout = output
-	command.Stderr = os.Stderr
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("run %s: %w", p.command, err)
-	}
-	return nil
-}
-
 func (p *CommandProcessor) Start(ctx context.Context) (io.WriteCloser, io.ReadCloser, func() error, error) {
 	if p.command == "" {
 		return nil, nil, nil, errors.New("processor command is required")
@@ -59,7 +45,7 @@ func (p *CommandProcessor) Start(ctx context.Context) (io.WriteCloser, io.ReadCl
 	return stdin, stdout, command.Wait, nil
 }
 
-var _ liveProcessor = (*CommandProcessor)(nil)
+var _ LiveProcessor = (*CommandProcessor)(nil)
 
 type FFmpegOggOpusStore struct {
 	ffmpeg    string
