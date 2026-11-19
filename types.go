@@ -5,6 +5,8 @@ const (
 	ChannelCaptureOutput     = "graph.capture.output"
 	ChannelAudioInput        = "graph.stt-whisper.input"
 	ChannelRecordENInput     = "graph.record-en.input"
+	ChannelProsodyAudio      = "graph.prosody.audio"
+	ChannelUtterances        = "graph.prosody.input"
 	ChannelASRText           = "graph.translate.input"
 	ChannelTranslationText   = "graph.tts.input"
 	ChannelTTSAudio          = "graph.record-es.input"

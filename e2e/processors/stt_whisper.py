@@ -7,6 +7,7 @@ import sys
 
 import numpy as np
 import sherpa_onnx
+from qol_processor import claim_stdout, write_utterance
 
 SAMPLE_RATE = 16000
 FRAME_BYTES = 3200
@@ -44,13 +45,25 @@ def model_paths() -> tuple[str, str, str, str]:
     return encoder, decoder, joiner, tokens
 
 
-def emit(text: str) -> None:
-    text = text.strip()
+def sample_ns(samples: int) -> int:
+    return samples * 1_000_000_000 // SAMPLE_RATE
+
+
+def normalize(text: str) -> str:
+    words = text.strip().lower().split()
+    words = ["I" if word == "i" else "I" + word[1:] if word.startswith("i'") else word for word in words]
+    sentence = " ".join(words)
+    return sentence[:1].upper() + sentence[1:]
+
+
+def emit(frames, start: int, end: int, text: str) -> None:
+    text = normalize(text)
     if text:
-        print(text, flush=True)
+        write_utterance(frames, sample_ns(start), sample_ns(end), text)
 
 
 def main() -> None:
+    frames = claim_stdout()
     encoder, decoder, joiner, tokens = model_paths()
     recognizer = sherpa_onnx.OnlineRecognizer.from_transducer(
         tokens=tokens,
@@ -96,24 +109,28 @@ def main() -> None:
     )
     assert ffmpeg.stdout is not None
     stream = recognizer.create_stream()
+    received = 0
+    segment_start = 0
     try:
         while True:
             data = ffmpeg.stdout.read(FRAME_BYTES)
             if not data:
                 break
             samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+            received += len(samples)
             stream.accept_waveform(SAMPLE_RATE, samples)
             while recognizer.is_ready(stream):
                 recognizer.decode_stream(stream)
             if recognizer.is_endpoint(stream):
-                emit(recognizer.get_result(stream))
+                emit(frames, segment_start, received, recognizer.get_result(stream))
                 recognizer.reset(stream)
+                segment_start = received
         tail = np.zeros(int(0.5 * SAMPLE_RATE), dtype=np.float32)
         stream.accept_waveform(SAMPLE_RATE, tail)
         stream.input_finished()
         while recognizer.is_ready(stream):
             recognizer.decode_stream(stream)
-        emit(recognizer.get_result(stream))
+        emit(frames, segment_start, received, recognizer.get_result(stream))
     finally:
         if ffmpeg.poll() is None:
             ffmpeg.terminate()

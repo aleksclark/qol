@@ -4,3 +4,5 @@ plugins:
     out: gen
     opt:
       - paths=source_relative
+  - protoc_builtin: python
+    out: e2e/processors/gen

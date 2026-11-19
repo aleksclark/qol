@@ -2,56 +2,108 @@ package e2e_test
 
 import (
 	"context"
+	"encoding/binary"
 	"io"
+	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	qol "github.com/aleksclark/qol"
+	"github.com/aleksclark/qol/internal/media"
+	"github.com/aleksclark/qol/internal/prosody"
 	"github.com/aleksclark/qol/internal/wire"
 	"github.com/aleksclark/qol/internal/worker"
 )
 
 type memoryBus struct {
-	mu       sync.Mutex
-	events   map[string][]qol.Event
-	handlers map[string][]qol.Handler
+	mu            sync.Mutex
+	events        map[string][]qol.Event
+	subscriptions map[string][]*subscription
 }
 
 func newMemoryBus() *memoryBus {
-	return &memoryBus{events: make(map[string][]qol.Event), handlers: make(map[string][]qol.Handler)}
+	return &memoryBus{events: make(map[string][]qol.Event), subscriptions: make(map[string][]*subscription)}
 }
 
 func (b *memoryBus) Publish(ctx context.Context, event qol.Event) error {
 	b.mu.Lock()
 	b.events[event.Channel] = append(b.events[event.Channel], event)
-	handlers := append([]qol.Handler(nil), b.handlers[event.Channel]...)
+	subscriptions := append([]*subscription(nil), b.subscriptions[event.Channel]...)
 	b.mu.Unlock()
-	for _, handler := range handlers {
-		if err := handler(ctx, event); err != nil {
-			return err
-		}
+	for _, subscription := range subscriptions {
+		subscription.enqueue(event)
 	}
-	return nil
+	return ctx.Err()
 }
 
-func (b *memoryBus) Subscribe(_ context.Context, channel string, _ qol.SubscribeOptions, handler qol.Handler) (qol.Subscription, error) {
+func (b *memoryBus) channel(name string) []qol.Event {
 	b.mu.Lock()
-	b.handlers[channel] = append(b.handlers[channel], handler)
+	defer b.mu.Unlock()
+	return append([]qol.Event(nil), b.events[name]...)
+}
+
+func (b *memoryBus) Subscribe(ctx context.Context, channel string, _ qol.SubscribeOptions, handler qol.Handler) (qol.Subscription, error) {
+	result := &subscription{done: make(chan struct{})}
+	result.ready = sync.NewCond(&result.mu)
+	b.mu.Lock()
+	b.subscriptions[channel] = append(b.subscriptions[channel], result)
 	b.mu.Unlock()
-	return &subscription{done: make(chan struct{})}, nil
+	go result.deliver(ctx, handler)
+	return result, nil
 }
 
 type subscription struct {
-	done chan struct{}
-	once sync.Once
+	mu      sync.Mutex
+	ready   *sync.Cond
+	pending []qol.Event
+	closed  bool
+	done    chan struct{}
+	once    sync.Once
 }
 
-func (s *subscription) Close() error          { s.once.Do(func() { close(s.done) }); return nil }
+func (s *subscription) enqueue(event qol.Event) {
+	s.mu.Lock()
+	s.pending = append(s.pending, event)
+	s.mu.Unlock()
+	s.ready.Signal()
+}
+
+func (s *subscription) deliver(ctx context.Context, handler qol.Handler) {
+	for {
+		s.mu.Lock()
+		for len(s.pending) == 0 && !s.closed {
+			s.ready.Wait()
+		}
+		if s.closed {
+			s.mu.Unlock()
+			return
+		}
+		event := s.pending[0]
+		s.pending = s.pending[1:]
+		s.mu.Unlock()
+		if err := handler(ctx, event); err != nil {
+			log.Printf("handler for %s failed: %v", event.Channel, err)
+		}
+	}
+}
+
+func (s *subscription) Close() error {
+	s.once.Do(func() {
+		s.mu.Lock()
+		s.closed = true
+		s.mu.Unlock()
+		s.ready.Broadcast()
+		close(s.done)
+	})
+	return nil
+}
 func (s *subscription) Done() <-chan struct{} { return s.done }
 func (s *subscription) Err() error            { return nil }
 
@@ -63,43 +115,68 @@ func TestRealEnglishToSpanishAudioGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	python := os.Getenv("QOL_E2E_PYTHON")
-	if python == "" {
-		python = "/home/aleks/work/projects/sermon_translate/server/.venv/bin/python"
-	}
+	python := envOr("QOL_E2E_PYTHON", "/home/aleks/.cache/qol/proc-venv/bin/python")
+	ttsPython := envOr("QOL_E2E_TTS_PYTHON", python)
+	ttsProcessor := envOr("QOL_E2E_TTS_PROCESSOR", "tts_spanish.py")
 	outputDir := filepath.Join(root, "e2e-artifacts")
 	if err := os.MkdirAll(outputDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
+	sample := clipSample(t, envOr("QOL_E2E_SAMPLE", filepath.Join(root, "sermon_sample.mp3")), envOr("QOL_E2E_SECONDS", "90"))
 	outputPath := filepath.Join(outputDir, "sermon_sample_spanish.ogg")
 	_ = os.Remove(outputPath)
-	_ = os.Remove(filepath.Join(outputDir, "sermon-sample-e2e.ogg"))
-	spool := t.TempDir()
+	for _, name := range []string{"sermon-sample-e2e-record-en.ogg", "sermon-sample-e2e-record-es.ogg"} {
+		_ = os.Remove(filepath.Join(outputDir, name))
+	}
+	processors := filepath.Join(root, "e2e/processors")
 	stages := []qol.Stage{
 		worker.NewCapture(),
-		worker.NewSTT(worker.NewCommandProcessor(python, filepath.Join(root, "e2e/processors/stt_whisper.py")), spool),
-		worker.NewTranslate(worker.NewCommandProcessor(python, filepath.Join(root, "e2e/processors/translate_en_es.py")), spool),
-		worker.NewTTS(worker.NewCommandProcessor(python, filepath.Join(root, "e2e/processors/tts_spanish.py")), spool),
-		worker.NewRecord("record-en", qol.ChannelRecordENInput, qol.ChannelRecordENCompleted, worker.NewFFmpegOggOpusStore("ffmpeg", outputDir), spool),
-		worker.NewRecord("record-es", qol.ChannelTTSAudio, qol.ChannelRecordESCompleted, worker.NewFFmpegS16LEOggOpusStore("ffmpeg", outputDir, 22050, 1), spool),
+		worker.NewSTT(worker.NewCommandProcessor(python, filepath.Join(processors, "stt_whisper.py"))),
+		worker.NewProsody(media.NewDecoder("ffmpeg"), prosody.DefaultReferenceRate, 30*time.Second),
+		worker.NewTranslate(worker.NewCommandProcessor(python, filepath.Join(processors, "translate_en_es.py"))),
+		worker.NewTTS(worker.NewCommandProcessor(ttsPython, filepath.Join(processors, ttsProcessor))),
+		worker.NewRecord("record-en", qol.ChannelRecordENInput, qol.ChannelRecordENCompleted, worker.NewFFmpegOggOpusStore("ffmpeg", outputDir)),
+		worker.NewRecord("record-es", qol.ChannelTTSAudio, qol.ChannelRecordESCompleted, worker.NewFFmpegS16LEOggOpusStore("ffmpeg", outputDir, worker.SynthesisSampleRate, 1)),
 	}
 	bus := newMemoryBus()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	inputs := 0
 	for _, stage := range stages {
+		inputs += len(stage.Spec().Inputs)
 		go func(stage qol.Stage) { _ = stage.Run(ctx, bus) }(stage)
 	}
-	waitForSubscriptions(t, bus, len(stages))
-	publishSample(t, ctx, bus, filepath.Join(root, "sermon_sample.mp3"))
+	waitForSubscriptions(t, bus, inputs)
+	started := time.Now()
+	publishSample(t, ctx, bus, sample)
+	waitForEvents(t, bus, qol.ChannelRecordESCompleted, 1, 10*time.Minute)
+	elapsed := time.Since(started)
 
 	english := textFrom(t, bus, qol.ChannelASRText)
 	spanish := translationFrom(t, bus)
 	if strings.EqualFold(strings.TrimSpace(english), strings.TrimSpace(spanish)) {
 		t.Fatalf("translation did not change the transcript: %q", spanish)
 	}
-	bus.mu.Lock()
-	completed := append([]qol.Event(nil), bus.events[qol.ChannelRecordESCompleted]...)
-	bus.mu.Unlock()
+	report := prosodyCarryThrough(t, bus)
+	if report.utterances < 5 {
+		t.Fatalf("expected at least 5 annotated utterances, got %d", report.utterances)
+	}
+	if report.annotated*10 < report.utterances*9 {
+		t.Fatalf("only %d of %d utterances carried prosody", report.annotated, report.utterances)
+	}
+	t.Logf("utterances=%d annotated=%d wall=%s", report.utterances, report.annotated, elapsed.Round(time.Millisecond))
+	t.Logf("carry-through correlation: rate=%.2f energy=%.2f pitch=%.2f", report.rate, report.energy, report.pitch)
+	if minimum := os.Getenv("QOL_E2E_MIN_RATE_CORRELATION"); minimum != "" {
+		threshold, err := strconv.ParseFloat(minimum, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report.rate < threshold {
+			t.Fatalf("speaking-rate carry-through %.2f is below %.2f", report.rate, threshold)
+		}
+	}
+
+	completed := bus.channel(qol.ChannelRecordESCompleted)
 	if len(completed) != 1 {
 		t.Fatalf("unexpected completion events: %#v", completed)
 	}
@@ -120,14 +197,144 @@ func TestRealEnglishToSpanishAudioGraph(t *testing.T) {
 	t.Logf("Spanish Ogg/Opus: %s", outputPath)
 }
 
+type carryThrough struct {
+	utterances int
+	annotated  int
+	rate       float64
+	energy     float64
+	pitch      float64
+}
+
+func prosodyCarryThrough(t *testing.T, bus *memoryBus) carryThrough {
+	t.Helper()
+	type utterance struct {
+		text    string
+		source  *qol.Prosody
+		samples []int16
+	}
+	bySpan := map[qol.Span]*utterance{}
+	var order []qol.Span
+	for _, event := range bus.channel(qol.ChannelTranslationText) {
+		translation, err := wire.UnmarshalTranslation(event.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if translation.Final {
+			continue
+		}
+		bySpan[event.Span] = &utterance{text: translation.Text, source: translation.Prosody}
+		order = append(order, event.Span)
+	}
+	for _, event := range bus.channel(qol.ChannelTTSAudio) {
+		if event.Type != qol.TypeAudioPCM {
+			continue
+		}
+		audio, err := wire.UnmarshalAudio(event.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := bySpan[event.Span]
+		if target == nil {
+			t.Fatalf("TTS audio for unknown span %+v", event.Span)
+		}
+		for index := 0; index+1 < len(audio.Data); index += 2 {
+			target.samples = append(target.samples, int16(binary.LittleEndian.Uint16(audio.Data[index:])))
+		}
+	}
+	var report carryThrough
+	var sourceRate, outputRate, sourceEnergy, outputEnergy, sourcePitch, outputPitch []float64
+	for _, span := range order {
+		item := bySpan[span]
+		report.utterances++
+		if item.source == nil {
+			continue
+		}
+		report.annotated++
+		measured := prosody.Analyze(item.samples, worker.SynthesisSampleRate, prosody.CountSyllables(item.text, "es"))
+		t.Logf("%6.1fs src rate=%.2f relE=%+.1fdB relP=%+.1fst arousal=%.2f markers=%v | out rate=%.2f E=%.1fdB P=%.0fHz | %s",
+			time.Duration(span.Start).Seconds(), item.source.RelativeRate, item.source.RelativeEnergyDB, item.source.RelativePitchSemitones, item.source.Arousal, item.source.Markers,
+			measured.Rate, measured.EnergyDB, measured.PitchHz, item.text)
+		if item.source.Rate == 0 || measured.Rate == 0 || measured.PitchHz == 0 {
+			continue
+		}
+		sourceRate = append(sourceRate, float64(item.source.RelativeRate))
+		outputRate = append(outputRate, measured.Rate)
+		sourceEnergy = append(sourceEnergy, float64(item.source.RelativeEnergyDB))
+		outputEnergy = append(outputEnergy, measured.EnergyDB)
+		sourcePitch = append(sourcePitch, float64(item.source.RelativePitchSemitones))
+		outputPitch = append(outputPitch, 12*math.Log2(measured.PitchHz))
+	}
+	report.rate = pearson(sourceRate, outputRate)
+	report.energy = pearson(sourceEnergy, outputEnergy)
+	report.pitch = pearson(sourcePitch, outputPitch)
+	return report
+}
+
+func pearson(left, right []float64) float64 {
+	if len(left) < 3 || len(left) != len(right) {
+		return math.NaN()
+	}
+	var meanLeft, meanRight float64
+	for index := range left {
+		meanLeft += left[index]
+		meanRight += right[index]
+	}
+	meanLeft /= float64(len(left))
+	meanRight /= float64(len(right))
+	var covariance, varianceLeft, varianceRight float64
+	for index := range left {
+		covariance += (left[index] - meanLeft) * (right[index] - meanRight)
+		varianceLeft += (left[index] - meanLeft) * (left[index] - meanLeft)
+		varianceRight += (right[index] - meanRight) * (right[index] - meanRight)
+	}
+	if varianceLeft == 0 || varianceRight == 0 {
+		return math.NaN()
+	}
+	return covariance / math.Sqrt(varianceLeft*varianceRight)
+}
+
+func envOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func clipSample(t *testing.T, source, seconds string) string {
+	t.Helper()
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("set QOL_E2E_SAMPLE to an English recording: %v", err)
+	}
+	clipped := filepath.Join(t.TempDir(), "sample.mp3")
+	command := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", source, "-t", seconds, "-c", "copy", clipped)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("clip sample: %v: %s", err, output)
+	}
+	return clipped
+}
+
+func waitForEvents(t *testing.T, bus *memoryBus, channel string, count int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for len(bus.channel(channel)) < count {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", channel)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func waitForSubscriptions(t *testing.T, bus *memoryBus, count int) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for {
 		bus.mu.Lock()
-		ready := len(bus.handlers) == count
+		ready := 0
+		for _, subscriptions := range bus.subscriptions {
+			ready += len(subscriptions)
+		}
 		bus.mu.Unlock()
-		if ready {
+		if ready == count {
 			return
 		}
 		if time.Now().After(deadline) {

@@ -27,14 +27,30 @@ type Text struct {
 	Speaker  string
 
 	Confidence float32
+
+	Prosody *Prosody
 }
 
 type Prosody struct {
-	PitchHz float32
-	Energy  float32
-
+	PitchHz  float32
+	Energy   float32
 	Rate     float32
 	Emphasis float32
+
+	PitchRangeSemitones    float32
+	RelativePitchSemitones float32
+	RelativeEnergyDB       float32
+	RelativeRate           float32
+	Arousal                float32
+
+	PauseBeforeMillis uint32
+	VoicedRatio       float32
+	SpeechSeconds     float32
+
+	Emotion           string
+	EmotionConfidence float32
+
+	Markers []string
 }
 
 type Speaker struct {
@@ -49,10 +65,28 @@ type Translation struct {
 	TargetLanguage string
 
 	Final bool
+
+	Prosody *Prosody
 }
 
 type StoredAudio struct {
 	MediaType string
 	Path      string
 	SizeBytes uint64
+}
+
+type Utterance struct {
+	Span Span
+	Text string
+}
+
+type SynthesisRequest struct {
+	Text     string
+	Language string
+	Prosody  *Prosody
+}
+
+type SynthesisChunk struct {
+	Audio          Audio
+	EndOfUtterance bool
 }
