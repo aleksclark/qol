@@ -44,6 +44,16 @@ go run ./cmd/qol-feed http://localhost:9875 --username admin --password change-m
 
 Recorded English and Spanish Ogg/Opus files are written to `tmp/`.
 
+## Fleet
+
+The worker graph also runs on the home Nomad fleet. The `qol-graph` job uses the shared fleet NATS cluster, which is deployed from the fleet-iac repository.
+
+```sh
+task fleet:images   # build and push worker images, refresh deploy/nomad/images.lock.hcl
+task fleet:deploy   # plan and run qol-graph
+task dev:fleet      # local API and web UI against the fleet graph
+```
+
 ## Verification
 
 ```sh

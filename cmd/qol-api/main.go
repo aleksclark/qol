@@ -28,7 +28,9 @@ func main() {
 
 func newCommand() *cobra.Command {
 	root := &cobra.Command{Use: "qol-api", Short: "Qol control plane"}
-	root.PersistentFlags().String("nats-url", nats.DefaultURL, "NATS server URL")
+	root.PersistentFlags().String("nats-url", nats.DefaultURL, "Comma-separated NATS server URLs")
+	root.PersistentFlags().String("nats-user", "", "NATS user")
+	root.PersistentFlags().String("nats-password", "", "NATS password; prefer QOL_NATS_PASSWORD")
 	root.PersistentFlags().String("data-dir", "/var/lib/qol", "Local persistence directory")
 	serve := &cobra.Command{Use: "serve", Short: "Run the API", RunE: runServe}
 	serve.Flags().String("http-address", ":8080", "HTTP API address")
@@ -52,7 +54,7 @@ func runServe(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	connection, _, authentication, bus, err := dependencies(settings.GetString("nats-url"), settings.GetString("data-dir"), settings.GetDuration("session-ttl"), settings.GetDuration("ticket-ttl"))
+	connection, _, authentication, bus, err := dependencies(natsOptions(settings), settings.GetString("data-dir"), settings.GetDuration("session-ttl"), settings.GetDuration("ticket-ttl"))
 	if err != nil {
 		return err
 	}
@@ -94,7 +96,7 @@ func runBootstrap(command *cobra.Command, _ []string) error {
 	if username == "" || password == "" {
 		return errors.New("username and password are required through flags or QOL_USERNAME and QOL_PASSWORD")
 	}
-	connection, _, authentication, _, err := dependencies(settings.GetString("nats-url"), settings.GetString("data-dir"), 24*time.Hour, time.Minute)
+	connection, _, authentication, _, err := dependencies(natsOptions(settings), settings.GetString("data-dir"), 24*time.Hour, time.Minute)
 	if err != nil {
 		return err
 	}
@@ -106,8 +108,12 @@ func runBootstrap(command *cobra.Command, _ []string) error {
 	return nil
 }
 
-func dependencies(url, dataDir string, sessionTTL, ticketTTL time.Duration) (*nats.Conn, *disk.Store, *auth.Service, *eventbus.Bus, error) {
-	connection, err := nats.Connect(url)
+func natsOptions(settings interface{ GetString(string) string }) eventbus.ConnectOptions {
+	return eventbus.ConnectOptions{URLs: settings.GetString("nats-url"), User: settings.GetString("nats-user"), Password: settings.GetString("nats-password"), Name: "qol-api"}
+}
+
+func dependencies(options eventbus.ConnectOptions, dataDir string, sessionTTL, ticketTTL time.Duration) (*nats.Conn, *disk.Store, *auth.Service, *eventbus.Bus, error) {
+	connection, err := eventbus.Connect(options)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

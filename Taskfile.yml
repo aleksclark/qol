@@ -2,6 +2,9 @@ version: "3"
 
 vars:
   DEV_COMPOSE: docker compose -f docker-compose.dev.yml --env-file .dev-certs/compose.env
+  FLEET_COMPOSE: docker compose -p qol-fleet -f docker-compose.fleet.yml --env-file .dev-certs/compose.env --env-file .dev-certs/fleet.env
+  FLEET_IMAGES: go-worker stt translate tts prosody
+  FLEET_REGISTRY: registry.fleet.clark.team/qol
   ADMIN_USERNAME: '{{default "admin" .QOL_ADMIN_USERNAME}}'
   ADMIN_PASSWORD: '{{default "change-me" .QOL_ADMIN_PASSWORD}}'
 
@@ -38,6 +41,39 @@ tasks:
   dev:
     desc: Start the development stack and provision the administrator
     cmds:
+      - task: dev:certs
+      - '{{.DEV_COMPOSE}} up --remove-orphans --build --detach'
+      - |
+        attempts=0
+        until {{.DEV_COMPOSE}} exec -T qol-api wget -q -O /dev/null http://localhost:8080/healthz >/dev/null 2>&1; do
+          attempts=$((attempts + 1))
+          if [ "$attempts" -ge 60 ]; then
+            {{.DEV_COMPOSE}} ps -a
+            {{.DEV_COMPOSE}} logs --no-color --tail=100 qol-api capture stt-whisper prosody translate tts record-en record-es
+            exit 1
+          fi
+          sleep 1
+        done
+      - |
+        output=$({{.DEV_COMPOSE}} exec -T \
+          -e QOL_USERNAME='{{.ADMIN_USERNAME}}' \
+          -e QOL_PASSWORD='{{.ADMIN_PASSWORD}}' \
+          qol-api go run ./cmd/qol-api admin bootstrap 2>&1) || {
+          case "$output" in
+            *"record already exists"*) ;;
+            *) printf '%s\n' "$output" >&2; exit 1 ;;
+          esac
+        }
+      - |
+        web_port=$({{.DEV_COMPOSE}} port web 5173 | sed 's/.*://')
+        printf '\nQol development stack is ready.\n'
+        printf 'Web:      http://localhost:%s\n' "$web_port"
+        printf 'Username: %s\n' '{{.ADMIN_USERNAME}}'
+        printf 'Password: %s\n\n' '{{.ADMIN_PASSWORD}}'
+
+  dev:certs:
+    internal: true
+    cmds:
       - |
         mkdir -p .dev-certs tmp
         if [ ! -s .dev-certs/localhost.pem ] || \
@@ -56,34 +92,78 @@ tasks:
           gid=0
         fi
         printf 'VITE_WEBTRANSPORT_CERT_HASH=%s\nQOL_UID=%s\nQOL_GID=%s\n' "$cert_hash" "$uid" "$gid" > .dev-certs/compose.env
-      - '{{.DEV_COMPOSE}} up --remove-orphans --build --detach'
+
+  dev:fleet:
+    desc: Run the API and web UI locally against the fleet NATS cluster and qol-graph workers
+    preconditions:
+      - sh: nomad var get nomad/jobs/qol-graph >/dev/null
+        msg: Nomad access (NOMAD_ADDR/NOMAD_TOKEN) and the nomad/jobs/qol-graph variable are required
+    cmds:
+      - task: dev:certs
+      - |
+        urls=$(nomad service info -t '{{"{{"}}range $i, $s := .{{"}}"}}{{"{{"}}if $i{{"}}"}},{{"{{"}}end{{"}}"}}nats://{{"{{"}}$s.Address{{"}}"}}:{{"{{"}}$s.Port{{"}}"}}{{"{{"}}end{{"}}"}}' nats)
+        : > .dev-certs/fleet.env
+        chmod 600 .dev-certs/fleet.env
+        printf 'QOL_NATS_URL=%s\nQOL_NATS_USER=qol\nQOL_NATS_PASSWORD=%s\n' "$urls" "$(nomad var get -item=nats_password nomad/jobs/qol-graph)" > .dev-certs/fleet.env
+      - '{{.FLEET_COMPOSE}} up --remove-orphans --build --detach'
       - |
         attempts=0
-        until {{.DEV_COMPOSE}} exec -T qol-api wget -q -O /dev/null http://localhost:8080/healthz >/dev/null 2>&1; do
+        until {{.FLEET_COMPOSE}} exec -T qol-api wget -q -O /dev/null http://localhost:8080/healthz >/dev/null 2>&1; do
           attempts=$((attempts + 1))
-          if [ "$attempts" -ge 60 ]; then
-            {{.DEV_COMPOSE}} ps -a
-            {{.DEV_COMPOSE}} logs --no-color --tail=100 qol-api capture stt-whisper prosody translate tts record-en record-es
+          if [ "$attempts" -ge 90 ]; then
+            {{.FLEET_COMPOSE}} logs --no-color --tail=100 qol-api
             exit 1
           fi
           sleep 1
         done
       - |
-        output=$({{.DEV_COMPOSE}} exec -T \
+        output=$({{.FLEET_COMPOSE}} exec -T \
           -e QOL_USERNAME='{{.ADMIN_USERNAME}}' \
           -e QOL_PASSWORD='{{.ADMIN_PASSWORD}}' \
-          qol-api go run ./cmd/qol-api admin bootstrap --nats-url nats://nats:4222 2>&1) || {
+          qol-api go run ./cmd/qol-api admin bootstrap 2>&1) || {
           case "$output" in
             *"record already exists"*) ;;
             *) printf '%s\n' "$output" >&2; exit 1 ;;
           esac
         }
       - |
-        web_port=$({{.DEV_COMPOSE}} port web 5173 | sed 's/.*://')
-        printf '\nQol development stack is ready.\n'
-        printf 'Web:      http://localhost:%s\n' "$web_port"
+        printf '\nQol is running against the fleet graph.\n'
+        printf 'Web:      http://localhost:%s\n' "$({{.FLEET_COMPOSE}} port web 5173 | sed 's/.*://')"
         printf 'Username: %s\n' '{{.ADMIN_USERNAME}}'
         printf 'Password: %s\n\n' '{{.ADMIN_PASSWORD}}'
+
+  dev:fleet:down:
+    desc: Stop the local API and web UI used with the fleet graph
+    cmds:
+      - '{{.FLEET_COMPOSE}} down --remove-orphans'
+
+  fleet:images:
+    desc: Build and push digest-pinned worker images and refresh deploy/nomad/images.lock.hcl
+    cmds:
+      - |
+        set -eu
+        tag=$(git rev-parse --short HEAD)
+        if [ -n "$(git status --porcelain -- . ':!deploy/nomad/images.lock.hcl')" ]; then
+          echo "commit changes before building fleet images" >&2
+          exit 1
+        fi
+        lock=deploy/nomad/images.lock.hcl
+        printf '# Generated by task fleet:images from %s. Digest-pinned; do not hand-edit.\n' "$tag" > "$lock.tmp"
+        for target in {{.FLEET_IMAGES}}; do
+          image={{.FLEET_REGISTRY}}/$target:$tag
+          docker build --target "$target" -f docker/fleet.Dockerfile -t "$image" .
+          docker push "$image" >/dev/null
+          digest=$(docker buildx imagetools inspect "$image" --format '{{"{{"}}json .Manifest{{"}}"}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
+          printf 'image_%s = "%s@%s"\n' "$(echo "$target" | tr - _)" "$image" "$digest" >> "$lock.tmp"
+        done
+        mv "$lock.tmp" "$lock"
+        cat "$lock"
+
+  fleet:deploy:
+    desc: Plan and run the qol-graph Nomad job with the pinned images
+    cmds:
+      - nomad job plan -var-file=deploy/nomad/images.lock.hcl deploy/nomad/qol-graph.nomad.hcl || test $? -eq 1
+      - nomad job run -var-file=deploy/nomad/images.lock.hcl deploy/nomad/qol-graph.nomad.hcl
 
   dev:down:
     desc: Stop and remove the development stack

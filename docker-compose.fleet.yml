@@ -1,0 +1,41 @@
+services:
+  qol-api:
+    build:
+      context: .
+      dockerfile: docker/go.dev.Dockerfile
+    command: ["air", "-c", ".air.api.toml"]
+    environment:
+      QOL_NATS_URL: ${QOL_NATS_URL}
+      QOL_NATS_USER: ${QOL_NATS_USER}
+      QOL_NATS_PASSWORD: ${QOL_NATS_PASSWORD}
+      QOL_ALLOWED_ORIGIN: http://localhost:9876
+      QOL_TLS_CERT: /certs/localhost.pem
+      QOL_TLS_KEY: /certs/localhost-key.pem
+      QOL_DATA_DIR: /var/lib/qol
+    volumes:
+      - .:/app
+      - ./.dev-certs:/certs:ro
+      - go-cache:/go/pkg/mod
+      - api-data:/var/lib/qol
+    ports:
+      - "9875:8080"
+      - "4443:4443/udp"
+  web:
+    image: node:24.15.0-alpine
+    working_dir: /app
+    command: ["sh", "-c", "npm install && npm run dev"]
+    environment:
+      VITE_API_ORIGIN: http://localhost:9875
+      VITE_WEBTRANSPORT_ORIGIN: https://localhost:4443
+      VITE_WEBTRANSPORT_CERT_HASH: ${VITE_WEBTRANSPORT_CERT_HASH}
+    volumes:
+      - ./web:/app
+      - web-modules:/app/node_modules
+    ports:
+      - "9876:5173"
+    depends_on:
+      - qol-api
+volumes:
+  api-data:
+  go-cache:
+  web-modules:

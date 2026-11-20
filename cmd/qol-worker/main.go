@@ -27,7 +27,9 @@ func main() {
 
 func newCommand() *cobra.Command {
 	command := &cobra.Command{Use: "qol-worker", Short: "Qol event worker"}
-	command.PersistentFlags().String("nats-url", nats.DefaultURL, "NATS server URL")
+	command.PersistentFlags().String("nats-url", nats.DefaultURL, "Comma-separated NATS server URLs")
+	command.PersistentFlags().String("nats-user", "", "NATS user")
+	command.PersistentFlags().String("nats-password", "", "NATS password; prefer QOL_NATS_PASSWORD")
 	runCommand := &cobra.Command{Use: "run", Short: "Run one streaming graph stage", RunE: run}
 	runCommand.Flags().String("type", "", "Stage type: capture, stt-whisper, prosody, translate, tts, or record")
 	runCommand.Flags().String("stage", "", "Deprecated alias for --type")
@@ -38,6 +40,7 @@ func newCommand() *cobra.Command {
 	runCommand.Flags().StringSlice("processor-arg", nil, "Streaming processor argument")
 	runCommand.Flags().Float64("reference-rate", prosody.DefaultReferenceRate, "Source-language reference speaking rate in syllables per second")
 	runCommand.Flags().Duration("prosody-timeout", worker.DefaultProsodyTimeout, "Maximum wait for source audio covering an utterance")
+	runCommand.Flags().Bool("attach-reference-audio", false, "Prosody: attach each utterance's source audio for synthesizers that condition on a reference")
 	runCommand.Flags().Duration("playout-delay", worker.DefaultPlayoutDelay, "TTS output starts this long after the source utterance ends")
 	runCommand.Flags().Float64("max-pace", worker.DefaultMaxPace, "Largest TTS speed-up used to catch up when output falls behind")
 	runCommand.Flags().Duration("catch-up-window", worker.DefaultCatchUpWindow, "Backlog that triggers the largest TTS speed-up")
@@ -52,7 +55,7 @@ func run(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	connection, err := nats.Connect(settings.GetString("nats-url"))
+	connection, err := eventbus.Connect(eventbus.ConnectOptions{URLs: settings.GetString("nats-url"), User: settings.GetString("nats-user"), Password: settings.GetString("nats-password"), Name: "qol-worker-" + settings.GetString("type")})
 	if err != nil {
 		return err
 	}
@@ -76,6 +79,7 @@ func run(command *cobra.Command, _ []string) error {
 		ffmpeg:         settings.GetString("ffmpeg"),
 		referenceRate:  settings.GetFloat64("reference-rate"),
 		prosodyTimeout: settings.GetDuration("prosody-timeout"),
+		attachAudio:    settings.GetBool("attach-reference-audio"),
 		timeline: worker.Timeline{
 			Delay:         settings.GetDuration("playout-delay"),
 			MaxPace:       settings.GetFloat64("max-pace"),
@@ -102,6 +106,7 @@ type stageOptions struct {
 	ffmpeg         string
 	referenceRate  float64
 	prosodyTimeout time.Duration
+	attachAudio    bool
 	timeline       worker.Timeline
 }
 
@@ -118,7 +123,7 @@ func buildStage(options stageOptions) (qol.Stage, error) {
 		if options.processor != "" {
 			emotion = worker.NewCommandProcessor(options.processor, options.args...)
 		}
-		return worker.NewProsody(media.NewDecoder(options.ffmpeg), emotion, options.referenceRate, options.prosodyTimeout), nil
+		return worker.NewProsody(media.NewDecoder(options.ffmpeg), emotion, options.referenceRate, options.prosodyTimeout).AttachReferenceAudio(options.attachAudio), nil
 	case "stt-whisper", "translate", "tts":
 		if options.processor == "" {
 			return nil, fmt.Errorf("%s requires --processor or QOL_PROCESSOR", options.stageType)

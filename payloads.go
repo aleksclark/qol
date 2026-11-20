@@ -54,6 +54,8 @@ type Prosody struct {
 	RelativePitchRangeSemitones float32
 
 	Markers []string
+
+	ReferenceAudio *Audio
 }
 
 type EmotionScore struct {

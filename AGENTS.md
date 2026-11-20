@@ -11,6 +11,8 @@ Qol is a streaming voice translation system with a Go control plane and stage wo
 - Protobuf lint/generation: `buf lint && buf generate` (Go plus Python processor bindings in `e2e/processors/gen`)
 - Development stack: run `task dev`. Dedicated worker images contain their processor dependencies and models.
 - Stop development: `task dev:down`; API data persists. Recorded Ogg/Opus files land in gitignored `tmp/`.
+- Fleet graph: the `qol-graph` Nomad job (`deploy/nomad/qol-graph.nomad.hcl`) runs every worker on node-1 against the fleet NATS cluster (fleet-iac `jobs/platform/messaging/nats.nomad.hcl`). `task fleet:images` builds and pushes `docker/fleet.Dockerfile` targets to `registry.fleet.clark.team/qol/*` and rewrites `deploy/nomad/images.lock.hcl` (commit first); `task fleet:deploy` plans and runs the job. `task dev:fleet` runs only the API and web UI locally, wired to fleet NATS through the gitignored `.dev-certs/fleet.env`; stop with `task dev:fleet:down`. Fleet recordings land in `/mnt/moosefs/configs/qol/recordings` on node-1.
+- NATS credentials: user `qol` in the fleet `QOL` account. The password lives in Nomad Variable `nomad/jobs/qol-graph` (`nats_password`, copied from `nomad/jobs/nats`). Pass it with `QOL_NATS_PASSWORD`, never on the command line or in Git.
 - Real-model graph test (host processors, no NATS): see `docs/speech-to-speech-roadmap.md`; it is skipped unless `QOL_RUN_REAL_GRAPH_E2E=1` and reports source-to-output prosody carry-through, onset lag, and (with `QOL_E2E_EMOTION_PYTHON`) emotion agreement. `QOL_E2E_DUMP_SYNTHESIS` writes a synthesis fixture for fleet TTS runs.
 - Offline scoring: `go run ./cmd/qol-eval carry-through --requests <fixture> --audio <chunks>`.
 - Fleet GPU jobs (run from the repository root): `deploy/nomad/tts-carry-through.nomad.hcl`, `deploy/nomad/translation-eval.nomad.hcl`, `deploy/nomad/qwen3-tts-bench.nomad.hcl`. Fetch outputs with `nomad alloc fs <alloc> <task>/local/<file>`.
@@ -81,7 +83,7 @@ Every externally visible worker implements `qol.Stage` through `Spec()` and `Run
 - Usernames are trimmed/lowercased. Session and ticket secrets are returned only to clients; their storage keys are SHA-256 hashes.
 - HTTP payloads, errors, NATS events, disk records, and WebTransport frames are protobuf. Frames are unsigned-varint length-prefixed and capped at 4 MiB.
 - WebTransport requires TLS and an exact origin match. `task dev` propagates the self-signed certificate hash to the browser.
-- Do not use JetStream, durable consumers, or NATS KV.
+- Do not use JetStream, durable consumers, or NATS KV. The fleet NATS cluster runs without JetStream.
 
 ## Generated code
 

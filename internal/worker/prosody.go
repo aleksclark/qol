@@ -42,6 +42,7 @@ type ProsodyStage struct {
 	spec           qol.StageSpec
 	decoder        LiveProcessor
 	emotion        *persistentProcess
+	attachAudio    bool
 	referenceRate  float64
 	timeout        time.Duration
 	now            func() time.Time
@@ -69,6 +70,11 @@ func NewProsody(decoder, emotion LiveProcessor, referenceRate float64, timeout t
 		},
 		decoder: decoder, emotion: classifier, referenceRate: referenceRate, timeout: timeout, now: time.Now, sessions: make(map[string]*prosodySession),
 	}
+}
+
+func (s *ProsodyStage) AttachReferenceAudio(enabled bool) *ProsodyStage {
+	s.attachAudio = enabled
+	return s
 }
 
 func (s *ProsodyStage) Spec() qol.StageSpec {
@@ -286,6 +292,13 @@ func (s *ProsodyStage) annotate(ctx context.Context, event qol.Event, session *p
 	session.spoken = true
 	result := session.tracker.Annotate(measurement, pause)
 	s.mu.Unlock()
+	if s.attachAudio {
+		reference := pcmBytes(segment)
+		if len(reference) > wire.MaxReferenceBytes {
+			reference = reference[:wire.MaxReferenceBytes]
+		}
+		result.ReferenceAudio = &qol.Audio{Format: qol.PCMFormat{SampleRate: ProsodySampleRate, Channels: 1, Format: qol.SampleS16LE}, Data: reference}
+	}
 	if s.emotion != nil {
 		emotion, err := s.classify(segment)
 		if err != nil {
@@ -335,12 +348,16 @@ func (s *ProsodyStage) segment(ctx context.Context, session *prosodySession, sta
 	return segment, true, nil
 }
 
-func (s *ProsodyStage) classify(segment []int16) (qol.EmotionResult, error) {
-	data := make([]byte, len(segment)*2)
-	for index, sample := range segment {
+func pcmBytes(samples []int16) []byte {
+	data := make([]byte, len(samples)*2)
+	for index, sample := range samples {
 		binary.LittleEndian.PutUint16(data[index*2:], uint16(sample))
 	}
-	audio := qol.Audio{Format: qol.PCMFormat{SampleRate: ProsodySampleRate, Channels: 1, Format: qol.SampleS16LE}, Data: data}
+	return data
+}
+
+func (s *ProsodyStage) classify(segment []int16) (qol.EmotionResult, error) {
+	audio := qol.Audio{Format: qol.PCMFormat{SampleRate: ProsodySampleRate, Channels: 1, Format: qol.SampleS16LE}, Data: pcmBytes(segment)}
 	processContext := s.processContext
 	if processContext == nil {
 		processContext = context.Background()
