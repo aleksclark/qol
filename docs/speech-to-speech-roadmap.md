@@ -123,13 +123,38 @@ Conclusions:
 3. Expressive autoregressive TTS (Qwen3-TTS, Chatterbox) runs at or slower than real time on the available GPUs, so it cannot sit on the live path yet.
 4. Lag is now dominated by segment length. Going below ~4 s needs streaming translation, not further tuning.
 
+### Round 3
+
+**Fleet NATS and fleet graph.**
+- **NATS:** fleet-iac PRs #69–#72 deployed a three-server core NATS cluster (no JetStream) on node-1, node-5, and node-6, with per-account credentials.
+- **Workers:** the `qol-graph` Nomad job runs every worker on node-1 from digest-pinned images in `registry.fleet.clark.team/qol`.
+- **Live run:** with the API and web UI on a workstation (`task dev:fleet`), a 60 s clip streamed at playback rate finished 0.9 s after the source ended.
+  - Both recordings landed on MooseFS.
+  - Kokoro on the node-1 CPU synthesized 2.6 s of speech in 0.21–0.33 s.
+  - emotion2vec+ took 0.07–0.15 s per utterance.
+  - Scheduled lag was 2.9–6.0 s, the same as the local stack.
+
+**Emotion by reference audio.** The prosody stage can attach each utterance's source audio (`--attach-reference-audio`). Chatterbox then uses it as its voice and style prompt. Same 39-utterance fixture, RTX 3060:
+
+| Chatterbox prompt | RTF | Rate r | Level r | Pitch r | Range r | Non-neutral source emotion reproduced | Non-neutral outputs |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Built-in voice | 0.56 | 0.27 | 0.58 | −0.29 | 0.14 | 1 / 11 | 2 / 11 |
+| Source utterance audio | 0.55 | 0.15 | 0.77 | 0.20 | 0.33 | 3 / 11 | 6 / 11 |
+
+Reference conditioning is the first change that moves emotion: angry and happy readings appear in the Spanish, where the built-in voice stays neutral. It also clones the English speaker's voice. It still loses speed control, and on the 3060 it needs roughly a 2 s playout budget to keep up. With 11 non-neutral utterances, the sample is too small to call the gain settled.
+
 ## Next steps
 
-1. **Emotion by reference audio.** Send the source utterance's audio (or a clip from an emotion-matched bank) to the synthesizer as a style reference. Candidates are Chatterbox's `audio_prompt_path`, IndexTTS 2's separate emotion prompt (check Spanish), and CosyVoice 3. Keep Kokoro as the live fallback. Judge with the emotion-agreement metric plus a human-labelled set.
+1. **Emotion by reference audio, continued.** Reference conditioning helps (round 3). Next:
+   - Build a human-labelled emotion set from the sermon and other speakers.
+   - Separate timbre from emotion: IndexTTS 2's emotion prompt (check Spanish), or a fixed Spanish voice plus an emotion-matched reference bank.
+   - Restore speed control on top: apply the `pace`/rate factor by time-stretching or duration conditioning.
+   - Decide whether cloning the speaker's voice is desirable.
+   - Running Chatterbox live on the 3060 needs a 2 s playout delay. Workers sharing the `qol-tts` queue group would split utterances, so run it as the only TTS worker.
 2. **Faster expressive synthesis.** Expressive models need RTF below 0.3. Try CosyVoice 3 streaming with vLLM, and TensorRT/vLLM serving for Chatterbox on the V100s.
 3. **Streaming translation.** Use wait-k or retranslation over the append-only ASR prefix so speech can start before a clause finishes. Evaluate on both lag and chrF.
 4. **ASR upgrade.** Compare Kyutai STT 1B and Parakeet TDT against Zipformer for accuracy and word timing. Word timing would enable word-level emphasis transfer.
-5. **Fleet serving.** To run workers on `node-6`, NATS must be reachable from the fleet. Either deploy NATS on Nomad or expose the dev NATS port.
+5. **Fleet serving (done in round 3).** See below.
 6. **Direct-model track.** Use SeamlessStreaming as a lag baseline. Start a Hibiki fine-tune study for en→es, with the cascade generating aligned training pairs.
 
 ## Running the evaluations
