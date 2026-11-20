@@ -17,6 +17,7 @@ const (
 type Tracker struct {
 	referenceRate float64
 	pitch         float64
+	pitchRange    float64
 	energy        float64
 	ready         bool
 }
@@ -48,11 +49,12 @@ func (t *Tracker) Annotate(measurement Measurement, pauseBefore time.Duration) q
 	pitch := semitones(measurement.PitchHz)
 	usable := measurement.SpeechSeconds >= minBaselineSeconds
 	if usable && !t.ready {
-		t.pitch, t.energy, t.ready = pitch, measurement.EnergyDB, true
+		t.pitch, t.pitchRange, t.energy, t.ready = pitch, measurement.PitchRangeSemitones, measurement.EnergyDB, true
 	}
 	if t.ready {
 		if measurement.PitchHz > 0 && t.pitch != 0 {
 			result.RelativePitchSemitones = float32(pitch - t.pitch)
+			result.RelativePitchRangeSemitones = float32(measurement.PitchRangeSemitones - t.pitchRange)
 		}
 		if measurement.SpeechSeconds > 0 {
 			result.RelativeEnergyDB = float32(measurement.EnergyDB - t.energy)
@@ -64,6 +66,7 @@ func (t *Tracker) Annotate(measurement Measurement, pauseBefore time.Duration) q
 				t.pitch = pitch
 			}
 			t.pitch += baselineWeight * (pitch - t.pitch)
+			t.pitchRange += baselineWeight * (measurement.PitchRangeSemitones - t.pitchRange)
 		}
 		t.energy += baselineWeight * (measurement.EnergyDB - t.energy)
 	}

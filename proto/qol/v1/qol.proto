@@ -66,6 +66,13 @@ message ProsodyPayload {
   string emotion = 13;
   float emotion_confidence = 14;
   repeated string markers = 15;
+  float relative_pitch_range_semitones = 16;
+  repeated EmotionScore emotion_scores = 17;
+}
+
+message EmotionScore {
+  string label = 1;
+  float score = 2;
 }
 
 message SpeakerPayload {

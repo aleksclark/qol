@@ -30,6 +30,9 @@ func ProsodyToProto(value *qol.Prosody) *qolv1.ProsodyPayload {
 		Emotion:                value.Emotion,
 		EmotionConfidence:      value.EmotionConfidence,
 		Markers:                append([]string(nil), value.Markers...),
+
+		RelativePitchRangeSemitones: value.RelativePitchRangeSemitones,
+		EmotionScores:               emotionScoresToProto(value.EmotionScores),
 	}
 }
 
@@ -53,14 +56,33 @@ func ProsodyFromProto(message *qolv1.ProsodyPayload) *qol.Prosody {
 		Emotion:                message.Emotion,
 		EmotionConfidence:      message.EmotionConfidence,
 		Markers:                append([]string(nil), message.Markers...),
+
+		RelativePitchRangeSemitones: message.RelativePitchRangeSemitones,
+		EmotionScores:               emotionScoresFromProto(message.EmotionScores),
 	}
+}
+
+func emotionScoresToProto(scores []qol.EmotionScore) []*qolv1.EmotionScore {
+	var result []*qolv1.EmotionScore
+	for _, score := range scores {
+		result = append(result, &qolv1.EmotionScore{Label: score.Label, Score: score.Score})
+	}
+	return result
+}
+
+func emotionScoresFromProto(scores []*qolv1.EmotionScore) []qol.EmotionScore {
+	var result []qol.EmotionScore
+	for _, score := range scores {
+		result = append(result, qol.EmotionScore{Label: score.GetLabel(), Score: score.GetScore()})
+	}
+	return result
 }
 
 func ValidateProsody(value *qol.Prosody) error {
 	if value == nil {
 		return nil
 	}
-	for _, field := range []float32{value.PitchHz, value.Energy, value.Rate, value.Emphasis, value.PitchRangeSemitones, value.RelativePitchSemitones, value.RelativeEnergyDB, value.RelativeRate, value.Arousal, value.VoicedRatio, value.SpeechSeconds, value.EmotionConfidence} {
+	for _, field := range []float32{value.PitchHz, value.Energy, value.Rate, value.Emphasis, value.PitchRangeSemitones, value.RelativePitchSemitones, value.RelativePitchRangeSemitones, value.RelativeEnergyDB, value.RelativeRate, value.Arousal, value.VoicedRatio, value.SpeechSeconds, value.EmotionConfidence} {
 		if math.IsNaN(float64(field)) || math.IsInf(float64(field), 0) {
 			return errors.New("prosody values must be finite")
 		}
@@ -70,6 +92,14 @@ func ValidateProsody(value *qol.Prosody) error {
 	}
 	if value.Emphasis < 0 || value.Emphasis > 1 || value.Arousal < 0 || value.Arousal > 1 || value.VoicedRatio < 0 || value.VoicedRatio > 1 {
 		return errors.New("prosody emphasis, arousal, and voiced ratio must be within 0..1")
+	}
+	if value.EmotionConfidence < 0 || value.EmotionConfidence > 1 {
+		return errors.New("prosody emotion confidence must be within 0..1")
+	}
+	for _, score := range value.EmotionScores {
+		if score.Label == "" || math.IsNaN(float64(score.Score)) || score.Score < 0 || score.Score > 1 {
+			return errors.New("emotion scores need a label and a 0..1 score")
+		}
 	}
 	return nil
 }
@@ -100,7 +130,10 @@ func WriteSynthesisRequest(writer io.Writer, value qol.SynthesisRequest) error {
 	if err := ValidateProsody(value.Prosody); err != nil {
 		return err
 	}
-	return WriteFrame(writer, &qolv1.SynthesisRequest{Text: value.Text, Language: value.Language, Prosody: ProsodyToProto(value.Prosody)})
+	if math.IsNaN(float64(value.Pace)) || value.Pace < 0 {
+		return errors.New("synthesis pace must be a non-negative number")
+	}
+	return WriteFrame(writer, &qolv1.SynthesisRequest{Text: value.Text, Language: value.Language, Prosody: ProsodyToProto(value.Prosody), Pace: value.Pace})
 }
 
 func ReadSynthesisRequest(reader *bufio.Reader) (qol.SynthesisRequest, error) {
@@ -108,7 +141,7 @@ func ReadSynthesisRequest(reader *bufio.Reader) (qol.SynthesisRequest, error) {
 	if err := ReadFrame(reader, message); err != nil {
 		return qol.SynthesisRequest{}, err
 	}
-	value := qol.SynthesisRequest{Text: message.Text, Language: message.Language, Prosody: ProsodyFromProto(message.Prosody)}
+	value := qol.SynthesisRequest{Text: message.Text, Language: message.Language, Prosody: ProsodyFromProto(message.Prosody), Pace: message.Pace}
 	if value.Text == "" || value.Language == "" {
 		return qol.SynthesisRequest{}, errors.New("synthesis text and language are required")
 	}
@@ -136,4 +169,46 @@ func ReadSynthesisChunk(reader *bufio.Reader) (qol.SynthesisChunk, error) {
 		return qol.SynthesisChunk{}, err
 	}
 	return qol.SynthesisChunk{Audio: qol.Audio{Format: qol.PCMFormat{SampleRate: int(message.Format.SampleRateHz), Channels: int(message.Format.ChannelCount), Format: format}, Data: append([]byte(nil), message.Data...)}, EndOfUtterance: message.EndOfUtterance}, nil
+}
+
+func WriteEmotionRequest(writer io.Writer, value qol.Audio) error {
+	format, err := sampleFormatToProto(value.Format.Format)
+	if err != nil {
+		return err
+	}
+	if value.Format.SampleRate <= 0 || value.Format.Channels <= 0 || len(value.Data) == 0 {
+		return errors.New("emotion request audio format and data are required")
+	}
+	return WriteFrame(writer, &qolv1.AudioPayload{Format: &qolv1.PcmFormat{SampleRateHz: uint32(value.Format.SampleRate), ChannelCount: uint32(value.Format.Channels), SampleFormat: format}, Data: value.Data})
+}
+
+func ReadEmotionRequest(reader *bufio.Reader) (qol.Audio, error) {
+	message := new(qolv1.AudioPayload)
+	if err := ReadFrame(reader, message); err != nil {
+		return qol.Audio{}, err
+	}
+	return audioFromProto(message)
+}
+
+func WriteEmotionResult(writer io.Writer, value qol.EmotionResult) error {
+	if err := validateEmotion(value); err != nil {
+		return err
+	}
+	return WriteFrame(writer, &qolv1.EmotionResult{Label: value.Label, Confidence: value.Confidence, Scores: emotionScoresToProto(value.Scores)})
+}
+
+func ReadEmotionResult(reader *bufio.Reader) (qol.EmotionResult, error) {
+	message := new(qolv1.EmotionResult)
+	if err := ReadFrame(reader, message); err != nil {
+		return qol.EmotionResult{}, err
+	}
+	value := qol.EmotionResult{Label: message.Label, Confidence: message.Confidence, Scores: emotionScoresFromProto(message.Scores)}
+	return value, validateEmotion(value)
+}
+
+func validateEmotion(value qol.EmotionResult) error {
+	if value.Label == "" || math.IsNaN(float64(value.Confidence)) || value.Confidence < 0 || value.Confidence > 1 {
+		return errors.New("emotion result needs a label and a 0..1 confidence")
+	}
+	return ValidateProsody(&qol.Prosody{EmotionScores: value.Scores})
 }

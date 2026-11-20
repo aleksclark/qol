@@ -20,7 +20,9 @@ def main() -> None:
         "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice,Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
     ).split(",")
     trials = int(os.environ.get("QOL_BENCH_TRIALS", "3"))
-    dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    if os.environ.get("QOL_BENCH_DTYPE"):
+        dtype = getattr(torch, os.environ["QOL_BENCH_DTYPE"])
     print(f"gpu={torch.cuda.get_device_name(0)} dtype={dtype}", flush=True)
     for model_id in models:
         model = Qwen3TTSModel.from_pretrained(model_id, device_map="cuda:0", dtype=dtype, attn_implementation="sdpa")

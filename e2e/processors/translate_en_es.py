@@ -10,11 +10,12 @@ from huggingface_hub import snapshot_download
 
 class Translator:
     def __init__(self) -> None:
-        model_id = "Helsinki-NLP/opus-mt-en-es"
+        model_id = os.environ.get("QOL_TRANSLATE_HF_MODEL", "Helsinki-NLP/opus-mt-tc-big-en-es")
         model_dir = os.environ.get(
             "QOL_TRANSLATE_MODEL",
-            os.path.expanduser("~/.cache/sermon_translate/opus-mt-en-es-ct2"),
+            os.path.expanduser("~/.cache/qol/models/opus-mt-tc-big-en-es-ct2"),
         )
+        self.beam_size = int(os.environ.get("QOL_TRANSLATE_BEAM", "4"))
         huggingface_dir = snapshot_download(model_id, local_files_only=True)
         self.source = spm.SentencePieceProcessor()
         self.source.load(os.path.join(huggingface_dir, "source.spm"))
@@ -27,7 +28,7 @@ class Translator:
         pieces: list[str] = []
         for start in range(0, len(tokens), 450):
             window = tokens[start : start + 450] + ["</s>"]
-            result = self.translator.translate_batch([window], beam_size=1)[0].hypotheses[0]
+            result = self.translator.translate_batch([window], beam_size=self.beam_size)[0].hypotheses[0]
             piece = self.target.decode(result).strip()
             if piece:
                 pieces.append(piece)

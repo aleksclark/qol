@@ -49,6 +49,10 @@ def sample_ns(samples: int) -> int:
     return samples * 1_000_000_000 // SAMPLE_RATE
 
 
+def seconds_ns(seconds: float) -> int:
+    return round(seconds * 1_000_000_000)
+
+
 def normalize(text: str) -> str:
     words = text.strip().lower().split()
     words = ["I" if word == "i" else "I" + word[1:] if word.startswith("i'") else word for word in words]
@@ -56,10 +60,74 @@ def normalize(text: str) -> str:
     return sentence[:1].upper() + sentence[1:]
 
 
-def emit(frames, start: int, end: int, text: str) -> None:
-    text = normalize(text)
-    if text:
-        write_utterance(frames, sample_ns(start), sample_ns(end), text)
+def load_punctuation():
+    directory = os.environ.get("QOL_PUNCT_MODEL", "")
+    if not directory:
+        return None
+    config = sherpa_onnx.OnlinePunctuationConfig(
+        model_config=sherpa_onnx.OnlinePunctuationModelConfig(
+            cnn_bilstm=first_existing(directory, "model.int8.onnx", "model.onnx"),
+            bpe_vocab=os.path.join(directory, "bpe.vocab"),
+        )
+    )
+    return sherpa_onnx.OnlinePunctuation(config).add_punctuation_with_case
+
+
+def timed_words(result) -> list[tuple[str, float]]:
+    words: list[tuple[str, float]] = []
+    for token, stamp in zip(result.tokens, result.timestamps):
+        if token.startswith(" ") or not words:
+            words.append((token.strip(), result.start_time + stamp))
+        else:
+            words[-1] = (words[-1][0] + token, words[-1][1])
+    return [(word, stamp) for word, stamp in words if word]
+
+
+class Segmenter:
+    def __init__(self, frames, punctuate) -> None:
+        self.frames = frames
+        self.punctuate = punctuate
+        self.commit_words = int(os.environ.get("QOL_STT_COMMIT_WORDS", "5"))
+        self.lookahead = int(os.environ.get("QOL_STT_COMMIT_LOOKAHEAD", "2"))
+        self.committed = 0
+        self.start_ns = 0
+
+    def format(self, words: list[str]) -> str:
+        text = " ".join(words).lower()
+        return self.punctuate(text) if self.punctuate else normalize(text)
+
+    def emit(self, words: list[str], end_ns: int) -> None:
+        text = self.format(words).strip()
+        if text:
+            write_utterance(self.frames, self.start_ns, max(end_ns, self.start_ns), text)
+        self.start_ns = max(end_ns, self.start_ns)
+
+    def partial(self, result) -> None:
+        if self.punctuate is None or self.commit_words <= 0:
+            return
+        words = timed_words(result)
+        pending = words[self.committed :]
+        if len(pending) < 3 + self.lookahead:
+            return
+        marked = self.punctuate(" ".join(word for word, _ in pending).lower()).split()
+        if len(marked) != len(pending):
+            return
+        boundary = -1
+        for index in range(len(pending) - self.lookahead - 1, -1, -1):
+            mark = marked[index][-1]
+            if (mark in ".?!" and index + 1 >= 3) or (mark in ",;:" and index + 1 >= self.commit_words):
+                boundary = index
+                break
+        if boundary < 0:
+            return
+        end_ns = seconds_ns(pending[boundary + 1][1])
+        self.emit([word for word, _ in pending[: boundary + 1]], end_ns)
+        self.committed += boundary + 1
+
+    def endpoint(self, result, end_ns: int) -> None:
+        words = [word for word, _ in timed_words(result)][self.committed :]
+        self.emit(words, end_ns)
+        self.committed = 0
 
 
 def main() -> None:
@@ -77,9 +145,10 @@ def main() -> None:
         provider="cpu",
         enable_endpoint_detection=True,
         rule1_min_trailing_silence=1.2,
-        rule2_min_trailing_silence=0.6,
-        rule3_min_utterance_length=5.0,
+        rule2_min_trailing_silence=float(os.environ.get("QOL_STT_TRAILING_SILENCE", "0.6")),
+        rule3_min_utterance_length=float(os.environ.get("QOL_STT_MAX_UTTERANCE", "4.0")),
     )
+    segmenter = Segmenter(frames, load_punctuation())
     ffmpeg = subprocess.Popen(
         [
             "ffmpeg",
@@ -110,7 +179,6 @@ def main() -> None:
     assert ffmpeg.stdout is not None
     stream = recognizer.create_stream()
     received = 0
-    segment_start = 0
     try:
         while True:
             data = ffmpeg.stdout.read(FRAME_BYTES)
@@ -122,15 +190,16 @@ def main() -> None:
             while recognizer.is_ready(stream):
                 recognizer.decode_stream(stream)
             if recognizer.is_endpoint(stream):
-                emit(frames, segment_start, received, recognizer.get_result(stream))
+                segmenter.endpoint(recognizer.get_result_all(stream), sample_ns(received))
                 recognizer.reset(stream)
-                segment_start = received
+            else:
+                segmenter.partial(recognizer.get_result_all(stream))
         tail = np.zeros(int(0.5 * SAMPLE_RATE), dtype=np.float32)
         stream.accept_waveform(SAMPLE_RATE, tail)
         stream.input_finished()
         while recognizer.is_ready(stream):
             recognizer.decode_stream(stream)
-        emit(frames, segment_start, received, recognizer.get_result(stream))
+        segmenter.endpoint(recognizer.get_result_all(stream), sample_ns(received))
     finally:
         if ffmpeg.poll() is None:
             ffmpeg.terminate()

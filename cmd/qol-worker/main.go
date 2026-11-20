@@ -38,6 +38,9 @@ func newCommand() *cobra.Command {
 	runCommand.Flags().StringSlice("processor-arg", nil, "Streaming processor argument")
 	runCommand.Flags().Float64("reference-rate", prosody.DefaultReferenceRate, "Source-language reference speaking rate in syllables per second")
 	runCommand.Flags().Duration("prosody-timeout", worker.DefaultProsodyTimeout, "Maximum wait for source audio covering an utterance")
+	runCommand.Flags().Duration("playout-delay", worker.DefaultPlayoutDelay, "TTS output starts this long after the source utterance ends")
+	runCommand.Flags().Float64("max-pace", worker.DefaultMaxPace, "Largest TTS speed-up used to catch up when output falls behind")
+	runCommand.Flags().Duration("catch-up-window", worker.DefaultCatchUpWindow, "Backlog that triggers the largest TTS speed-up")
 	runCommand.Flags().String("output-dir", "/output", "Ogg/Opus output directory")
 	runCommand.Flags().String("ffmpeg", "ffmpeg", "ffmpeg executable")
 	command.AddCommand(runCommand)
@@ -73,6 +76,11 @@ func run(command *cobra.Command, _ []string) error {
 		ffmpeg:         settings.GetString("ffmpeg"),
 		referenceRate:  settings.GetFloat64("reference-rate"),
 		prosodyTimeout: settings.GetDuration("prosody-timeout"),
+		timeline: worker.Timeline{
+			Delay:         settings.GetDuration("playout-delay"),
+			MaxPace:       settings.GetFloat64("max-pace"),
+			CatchUpWindow: settings.GetDuration("catch-up-window"),
+		},
 	})
 	if err != nil {
 		return err
@@ -94,6 +102,7 @@ type stageOptions struct {
 	ffmpeg         string
 	referenceRate  float64
 	prosodyTimeout time.Duration
+	timeline       worker.Timeline
 }
 
 func buildStage(options stageOptions) (qol.Stage, error) {
@@ -105,7 +114,11 @@ func buildStage(options stageOptions) (qol.Stage, error) {
 	case "capture":
 		return worker.NewCapture(), nil
 	case "prosody":
-		return worker.NewProsody(media.NewDecoder(options.ffmpeg), options.referenceRate, options.prosodyTimeout), nil
+		var emotion worker.LiveProcessor
+		if options.processor != "" {
+			emotion = worker.NewCommandProcessor(options.processor, options.args...)
+		}
+		return worker.NewProsody(media.NewDecoder(options.ffmpeg), emotion, options.referenceRate, options.prosodyTimeout), nil
 	case "stt-whisper", "translate", "tts":
 		if options.processor == "" {
 			return nil, fmt.Errorf("%s requires --processor or QOL_PROCESSOR", options.stageType)
@@ -117,7 +130,7 @@ func buildStage(options stageOptions) (qol.Stage, error) {
 		case "translate":
 			return worker.NewTranslate(processor), nil
 		default:
-			return worker.NewTTS(processor), nil
+			return worker.NewTTS(processor, options.timeline), nil
 		}
 	case "record":
 		if options.input == "" || options.output == "" {

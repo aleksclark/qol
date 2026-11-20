@@ -121,6 +121,7 @@ func TestTrackerCarriesRelativeDelivery(t *testing.T) {
 	}
 	near(t, "relative rate", float64(excited.RelativeRate), 1.4, 0.001)
 	near(t, "relative pitch", float64(excited.RelativePitchSemitones), 12*math.Log2(190.0/150), 0.01)
+	near(t, "relative range", float64(excited.RelativePitchRangeSemitones), 5, 0.01)
 
 	calm := tracker.Annotate(prosody.Measurement{PitchHz: 120, EnergyDB: -33, Rate: 2.8, SpeechSeconds: 2, PitchRangeSemitones: 2}, 0)
 	for _, marker := range []string{"slow", "soft", "low", "monotone"} {
