@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	qol "github.com/aleksclark/qol"
@@ -86,9 +87,12 @@ func (b *Bus) Subscribe(ctx context.Context, channel string, opts qol.SubscribeO
 	callback := func(message *nats.Msg) {
 		event, err := decode(message.Data)
 		if err != nil {
+			slog.Error("drop undecodable event", "subject", message.Subject, "error", err)
 			return
 		}
-		_ = handler(ctx, event)
+		if err := handler(ctx, event); err != nil {
+			slog.Error("event handler failed", "subject", message.Subject, "session", event.SessionID, "sequence", event.Seq, "error", err)
+		}
 	}
 	var err error
 	if opts.Group == "" {
