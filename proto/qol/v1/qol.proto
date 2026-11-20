@@ -68,6 +68,7 @@ message ProsodyPayload {
   repeated string markers = 15;
   float relative_pitch_range_semitones = 16;
   repeated EmotionScore emotion_scores = 17;
+  AudioPayload reference_audio = 18;
 }
 
 message EmotionScore {

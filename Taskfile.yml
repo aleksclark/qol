@@ -102,7 +102,8 @@ tasks:
       - task: dev:certs
       - |
         urls=$(nomad service info -t '{{"{{"}}range $i, $s := .{{"}}"}}{{"{{"}}if $i{{"}}"}},{{"{{"}}end{{"}}"}}nats://{{"{{"}}$s.Address{{"}}"}}:{{"{{"}}$s.Port{{"}}"}}{{"{{"}}end{{"}}"}}' nats)
-        umask 077
+        : > .dev-certs/fleet.env
+        chmod 600 .dev-certs/fleet.env
         printf 'QOL_NATS_URL=%s\nQOL_NATS_USER=qol\nQOL_NATS_PASSWORD=%s\n' "$urls" "$(nomad var get -item=nats_password nomad/jobs/qol-graph)" > .dev-certs/fleet.env
       - '{{.FLEET_COMPOSE}} up --remove-orphans --build --detach'
       - |

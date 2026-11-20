@@ -135,7 +135,7 @@ func TestRealEnglishToSpanishAudioGraph(t *testing.T) {
 	stages := []qol.Stage{
 		worker.NewCapture(),
 		worker.NewSTT(worker.NewCommandProcessor(python, filepath.Join(processors, "stt_whisper.py"))),
-		worker.NewProsody(media.NewDecoder("ffmpeg"), emotionStage(emotionPython, processors), prosody.DefaultReferenceRate, 30*time.Second),
+		worker.NewProsody(media.NewDecoder("ffmpeg"), emotionStage(emotionPython, processors), prosody.DefaultReferenceRate, 30*time.Second).AttachReferenceAudio(os.Getenv("QOL_E2E_ATTACH_REFERENCE") == "1"),
 		worker.NewTranslate(worker.NewCommandProcessor(python, filepath.Join(processors, "translate_en_es.py"))),
 		worker.NewTTS(worker.NewCommandProcessor(ttsPython, filepath.Join(processors, ttsProcessor)), timelineFromEnv(t)),
 		worker.NewRecord("record-en", qol.ChannelRecordENInput, qol.ChannelRecordENCompleted, worker.NewFFmpegOggOpusStore("ffmpeg", outputDir)),

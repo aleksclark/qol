@@ -148,3 +148,28 @@ func TestEmotionFramesRoundTrip(t *testing.T) {
 		t.Fatal("expected negative pace to fail")
 	}
 }
+
+func TestProsodyReferenceAudio(t *testing.T) {
+	prosody := sampleProsody()
+	prosody.ReferenceAudio = &qol.Audio{Format: qol.PCMFormat{SampleRate: 16000, Channels: 1, Format: qol.SampleS16LE}, Data: []byte{1, 2, 3, 4}}
+	payload, err := wire.MarshalText(qol.Text{Text: "hello", Language: "en", Prosody: prosody})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := wire.UnmarshalText(payload)
+	if err != nil || !reflect.DeepEqual(decoded.Prosody.ReferenceAudio, prosody.ReferenceAudio) {
+		t.Fatalf("reference audio must round-trip: %#v %v", decoded.Prosody, err)
+	}
+	for name, reference := range map[string]*qol.Audio{
+		"stereo": {Format: qol.PCMFormat{SampleRate: 16000, Channels: 2, Format: qol.SampleS16LE}, Data: []byte{1, 2, 3, 4}},
+		"odd":    {Format: qol.PCMFormat{SampleRate: 16000, Channels: 1, Format: qol.SampleS16LE}, Data: []byte{1, 2, 3}},
+		"empty":  {Format: qol.PCMFormat{SampleRate: 16000, Channels: 1, Format: qol.SampleS16LE}},
+		"large":  {Format: qol.PCMFormat{SampleRate: 16000, Channels: 1, Format: qol.SampleS16LE}, Data: make([]byte, wire.MaxReferenceBytes+2)},
+	} {
+		invalid := sampleProsody()
+		invalid.ReferenceAudio = reference
+		if _, err := wire.MarshalText(qol.Text{Text: "hello", Language: "en", Prosody: invalid}); err == nil {
+			t.Fatalf("%s reference audio must be rejected", name)
+		}
+	}
+}

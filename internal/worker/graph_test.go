@@ -513,7 +513,7 @@ func TestProsodyAddsClassifiedEmotion(t *testing.T) {
 		}
 	})
 	bus := newMemoryBus()
-	runStages(t, bus, worker.NewProsody(passthroughDecoder(), classifier, 4, time.Second))
+	runStages(t, bus, worker.NewProsody(passthroughDecoder(), classifier, 4, time.Second).AttachReferenceAudio(true))
 	if err := bus.Publish(context.Background(), audioEvent(t, qol.ChannelProsodyAudio, 0, voicePCM(time.Second, 160, 0.3), true)); err != nil {
 		t.Fatal(err)
 	}
@@ -526,6 +526,9 @@ func TestProsodyAddsClassifiedEmotion(t *testing.T) {
 	}
 	if text.Prosody.Emotion != "happy" || text.Prosody.EmotionConfidence != 0.9 || len(text.Prosody.EmotionScores) != 2 || !slices.Contains(text.Prosody.Markers, "happy") {
 		t.Fatalf("emotion not attached: %+v", text.Prosody)
+	}
+	if reference := text.Prosody.ReferenceAudio; reference == nil || len(reference.Data) != 2*worker.ProsodySampleRate || reference.Format.SampleRate != worker.ProsodySampleRate {
+		t.Fatalf("reference audio must carry the source utterance: %+v", reference)
 	}
 	if len(sampleCounts) != 1 || sampleCounts[0] != worker.ProsodySampleRate {
 		t.Fatalf("classifier must receive the utterance audio: %v", sampleCounts)

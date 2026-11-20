@@ -3,12 +3,15 @@ package wire
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 
 	qol "github.com/aleksclark/qol"
 	qolv1 "github.com/aleksclark/qol/gen/qol/v1"
 )
+
+const MaxReferenceBytes = 512 << 10
 
 func ProsodyToProto(value *qol.Prosody) *qolv1.ProsodyPayload {
 	if value == nil {
@@ -33,7 +36,19 @@ func ProsodyToProto(value *qol.Prosody) *qolv1.ProsodyPayload {
 
 		RelativePitchRangeSemitones: value.RelativePitchRangeSemitones,
 		EmotionScores:               emotionScoresToProto(value.EmotionScores),
+		ReferenceAudio:              audioToProto(value.ReferenceAudio),
 	}
+}
+
+func audioToProto(value *qol.Audio) *qolv1.AudioPayload {
+	if value == nil {
+		return nil
+	}
+	format, err := sampleFormatToProto(value.Format.Format)
+	if err != nil {
+		return nil
+	}
+	return &qolv1.AudioPayload{Format: &qolv1.PcmFormat{SampleRateHz: uint32(value.Format.SampleRate), ChannelCount: uint32(value.Format.Channels), SampleFormat: format}, Data: append([]byte(nil), value.Data...)}
 }
 
 func ProsodyFromProto(message *qolv1.ProsodyPayload) *qol.Prosody {
@@ -59,7 +74,19 @@ func ProsodyFromProto(message *qolv1.ProsodyPayload) *qol.Prosody {
 
 		RelativePitchRangeSemitones: message.RelativePitchRangeSemitones,
 		EmotionScores:               emotionScoresFromProto(message.EmotionScores),
+		ReferenceAudio:              referenceFromProto(message.ReferenceAudio),
 	}
+}
+
+func referenceFromProto(message *qolv1.AudioPayload) *qol.Audio {
+	if message == nil {
+		return nil
+	}
+	audio, err := audioFromProto(message)
+	if err != nil {
+		return &qol.Audio{}
+	}
+	return &audio
 }
 
 func emotionScoresToProto(scores []qol.EmotionScore) []*qolv1.EmotionScore {
@@ -95,6 +122,14 @@ func ValidateProsody(value *qol.Prosody) error {
 	}
 	if value.EmotionConfidence < 0 || value.EmotionConfidence > 1 {
 		return errors.New("prosody emotion confidence must be within 0..1")
+	}
+	if reference := value.ReferenceAudio; reference != nil {
+		if reference.Format.Format != qol.SampleS16LE || reference.Format.Channels != 1 || reference.Format.SampleRate <= 0 || len(reference.Data) == 0 || len(reference.Data)%2 != 0 {
+			return errors.New("prosody reference audio must be non-empty mono S16LE PCM")
+		}
+		if len(reference.Data) > MaxReferenceBytes {
+			return fmt.Errorf("prosody reference audio exceeds %d bytes", MaxReferenceBytes)
+		}
 	}
 	for _, score := range value.EmotionScores {
 		if score.Label == "" || math.IsNaN(float64(score.Score)) || score.Score < 0 || score.Score > 1 {
