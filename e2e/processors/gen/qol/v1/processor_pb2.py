@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from qol.v1 import qol_pb2 as qol_dot_v1_dot_qol__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16qol/v1/processor.proto\x12\x06qol.v1\x1a\x10qol/v1/qol.proto\"P\n\x13RecognizedUtterance\x12%\n\x04span\x18\x01 \x01(\x0b\x32\x11.qol.v1.MediaSpanR\x04span\x12\x12\n\x04text\x18\x02 \x01(\tR\x04text\"t\n\x10SynthesisRequest\x12\x12\n\x04text\x18\x01 \x01(\tR\x04text\x12\x1a\n\x08language\x18\x02 \x01(\tR\x08language\x12\x30\n\x07prosody\x18\x03 \x01(\x0b\x32\x16.qol.v1.ProsodyPayloadR\x07prosody\"y\n\x0eSynthesisChunk\x12)\n\x06\x66ormat\x18\x01 \x01(\x0b\x32\x11.qol.v1.PcmFormatR\x06\x66ormat\x12\x12\n\x04\x64\x61ta\x18\x02 \x01(\x0cR\x04\x64\x61ta\x12(\n\x10\x65nd_of_utterance\x18\x03 \x01(\x08R\x0e\x65ndOfUtteranceB,Z*github.com/aleksclark/qol/gen/qol/v1;qolv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16qol/v1/processor.proto\x12\x06qol.v1\x1a\x10qol/v1/qol.proto\"P\n\x13RecognizedUtterance\x12%\n\x04span\x18\x01 \x01(\x0b\x32\x11.qol.v1.MediaSpanR\x04span\x12\x12\n\x04text\x18\x02 \x01(\tR\x04text\"\x88\x01\n\x10SynthesisRequest\x12\x12\n\x04text\x18\x01 \x01(\tR\x04text\x12\x1a\n\x08language\x18\x02 \x01(\tR\x08language\x12\x30\n\x07prosody\x18\x03 \x01(\x0b\x32\x16.qol.v1.ProsodyPayloadR\x07prosody\x12\x12\n\x04pace\x18\x04 \x01(\x02R\x04pace\"y\n\x0eSynthesisChunk\x12)\n\x06\x66ormat\x18\x01 \x01(\x0b\x32\x11.qol.v1.PcmFormatR\x06\x66ormat\x12\x12\n\x04\x64\x61ta\x18\x02 \x01(\x0cR\x04\x64\x61ta\x12(\n\x10\x65nd_of_utterance\x18\x03 \x01(\x08R\x0e\x65ndOfUtterance\"s\n\rEmotionResult\x12\x14\n\x05label\x18\x01 \x01(\tR\x05label\x12\x1e\n\nconfidence\x18\x02 \x01(\x02R\nconfidence\x12,\n\x06scores\x18\x03 \x03(\x0b\x32\x14.qol.v1.EmotionScoreR\x06scoresB,Z*github.com/aleksclark/qol/gen/qol/v1;qolv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -35,8 +35,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._serialized_options = b'Z*github.com/aleksclark/qol/gen/qol/v1;qolv1'
   _globals['_RECOGNIZEDUTTERANCE']._serialized_start=52
   _globals['_RECOGNIZEDUTTERANCE']._serialized_end=132
-  _globals['_SYNTHESISREQUEST']._serialized_start=134
-  _globals['_SYNTHESISREQUEST']._serialized_end=250
-  _globals['_SYNTHESISCHUNK']._serialized_start=252
-  _globals['_SYNTHESISCHUNK']._serialized_end=373
+  _globals['_SYNTHESISREQUEST']._serialized_start=135
+  _globals['_SYNTHESISREQUEST']._serialized_end=271
+  _globals['_SYNTHESISCHUNK']._serialized_start=273
+  _globals['_SYNTHESISCHUNK']._serialized_end=394
+  _globals['_EMOTIONRESULT']._serialized_start=396
+  _globals['_EMOTIONRESULT']._serialized_end=511
 # @@protoc_insertion_point(module_scope)

@@ -1,11 +1,12 @@
 package e2e_test
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/binary"
 	"io"
 	"log"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	qol "github.com/aleksclark/qol"
+	"github.com/aleksclark/qol/internal/evaluation"
 	"github.com/aleksclark/qol/internal/media"
 	"github.com/aleksclark/qol/internal/prosody"
 	"github.com/aleksclark/qol/internal/wire"
@@ -118,6 +120,7 @@ func TestRealEnglishToSpanishAudioGraph(t *testing.T) {
 	python := envOr("QOL_E2E_PYTHON", "/home/aleks/.cache/qol/proc-venv/bin/python")
 	ttsPython := envOr("QOL_E2E_TTS_PYTHON", python)
 	ttsProcessor := envOr("QOL_E2E_TTS_PROCESSOR", "tts_spanish.py")
+	emotionPython := os.Getenv("QOL_E2E_EMOTION_PYTHON")
 	outputDir := filepath.Join(root, "e2e-artifacts")
 	if err := os.MkdirAll(outputDir, 0o750); err != nil {
 		t.Fatal(err)
@@ -132,9 +135,9 @@ func TestRealEnglishToSpanishAudioGraph(t *testing.T) {
 	stages := []qol.Stage{
 		worker.NewCapture(),
 		worker.NewSTT(worker.NewCommandProcessor(python, filepath.Join(processors, "stt_whisper.py"))),
-		worker.NewProsody(media.NewDecoder("ffmpeg"), prosody.DefaultReferenceRate, 30*time.Second),
+		worker.NewProsody(media.NewDecoder("ffmpeg"), emotionStage(emotionPython, processors), prosody.DefaultReferenceRate, 30*time.Second),
 		worker.NewTranslate(worker.NewCommandProcessor(python, filepath.Join(processors, "translate_en_es.py"))),
-		worker.NewTTS(worker.NewCommandProcessor(ttsPython, filepath.Join(processors, ttsProcessor))),
+		worker.NewTTS(worker.NewCommandProcessor(ttsPython, filepath.Join(processors, ttsProcessor)), timelineFromEnv(t)),
 		worker.NewRecord("record-en", qol.ChannelRecordENInput, qol.ChannelRecordENCompleted, worker.NewFFmpegOggOpusStore("ffmpeg", outputDir)),
 		worker.NewRecord("record-es", qol.ChannelTTSAudio, qol.ChannelRecordESCompleted, worker.NewFFmpegS16LEOggOpusStore("ffmpeg", outputDir, worker.SynthesisSampleRate, 1)),
 	}
@@ -157,22 +160,49 @@ func TestRealEnglishToSpanishAudioGraph(t *testing.T) {
 	if strings.EqualFold(strings.TrimSpace(english), strings.TrimSpace(spanish)) {
 		t.Fatalf("translation did not change the transcript: %q", spanish)
 	}
-	report := prosodyCarryThrough(t, bus)
-	if report.utterances < 5 {
-		t.Fatalf("expected at least 5 annotated utterances, got %d", report.utterances)
+	var classify evaluation.Classifier
+	if emotionPython != "" {
+		classify = emotionClassifier(t, emotionPython, filepath.Join(processors, "emotion_emotion2vec.py"))
 	}
-	if report.annotated*10 < report.utterances*9 {
-		t.Fatalf("only %d of %d utterances carried prosody", report.annotated, report.utterances)
+	utterances, err := evaluation.FromGraphEvents(bus.channel(qol.ChannelTranslationText), bus.channel(qol.ChannelTTSAudio))
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Logf("utterances=%d annotated=%d wall=%s", report.utterances, report.annotated, elapsed.Round(time.Millisecond))
-	t.Logf("carry-through correlation: rate=%.2f energy=%.2f pitch=%.2f", report.rate, report.energy, report.pitch)
-	if minimum := os.Getenv("QOL_E2E_MIN_RATE_CORRELATION"); minimum != "" {
-		threshold, err := strconv.ParseFloat(minimum, 64)
+	report, err := evaluation.CarryThrough(utterances, classify)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range report.Rows {
+		t.Log(row)
+	}
+	if report.Utterances < 5 {
+		t.Fatalf("expected at least 5 annotated utterances, got %d", report.Utterances)
+	}
+	if report.Annotated*10 < report.Utterances*9 {
+		t.Fatalf("only %d of %d utterances carried prosody", report.Annotated, report.Utterances)
+	}
+	t.Logf("wall=%s %s", elapsed.Round(time.Millisecond), report.Summary())
+	if dump := os.Getenv("QOL_E2E_DUMP_SYNTHESIS"); dump != "" {
+		writeSynthesisFixture(t, dump, utterances)
+	}
+	for name, value := range map[string]float64{"QOL_E2E_MIN_RATE_CORRELATION": report.Rate, "QOL_E2E_MIN_PITCH_CORRELATION": report.Pitch} {
+		if minimum := os.Getenv(name); minimum != "" {
+			threshold, err := strconv.ParseFloat(minimum, 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if value < threshold {
+				t.Fatalf("%s: carry-through %.2f is below %.2f", name, value, threshold)
+			}
+		}
+	}
+	if maximum := os.Getenv("QOL_E2E_MAX_P90_LAG"); maximum != "" {
+		limit, err := time.ParseDuration(maximum)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if report.rate < threshold {
-			t.Fatalf("speaking-rate carry-through %.2f is below %.2f", report.rate, threshold)
+		if report.LagP90 > limit {
+			t.Fatalf("p90 onset lag %s exceeds %s", report.LagP90, limit)
 		}
 	}
 
@@ -197,100 +227,74 @@ func TestRealEnglishToSpanishAudioGraph(t *testing.T) {
 	t.Logf("Spanish Ogg/Opus: %s", outputPath)
 }
 
-type carryThrough struct {
-	utterances int
-	annotated  int
-	rate       float64
-	energy     float64
-	pitch      float64
-}
-
-func prosodyCarryThrough(t *testing.T, bus *memoryBus) carryThrough {
+func emotionClassifier(t *testing.T, python, script string) evaluation.Classifier {
 	t.Helper()
-	type utterance struct {
-		text    string
-		source  *qol.Prosody
-		samples []int16
+	input, output, wait, err := worker.NewCommandProcessor(python, script).Start(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
-	bySpan := map[qol.Span]*utterance{}
-	var order []qol.Span
-	for _, event := range bus.channel(qol.ChannelTranslationText) {
-		translation, err := wire.UnmarshalTranslation(event.Payload)
+	t.Cleanup(func() {
+		_ = input.Close()
+		_ = wait()
+	})
+	reader := bufio.NewReader(output)
+	return func(samples []int16, sampleRate int) (qol.EmotionResult, error) {
+		raw := make([]byte, len(samples)*2)
+		for index, sample := range samples {
+			binary.LittleEndian.PutUint16(raw[index*2:], uint16(sample))
+		}
+		command := exec.Command("ffmpeg", "-v", "error", "-f", "s16le", "-ar", strconv.Itoa(sampleRate), "-ac", "1", "-i", "pipe:0", "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1")
+		command.Stdin = bytes.NewReader(raw)
+		resampled, err := command.Output()
 		if err != nil {
-			t.Fatal(err)
+			return qol.EmotionResult{}, err
 		}
-		if translation.Final {
-			continue
+		if err := wire.WriteEmotionRequest(input, qol.Audio{Format: qol.PCMFormat{SampleRate: 16000, Channels: 1, Format: qol.SampleS16LE}, Data: resampled}); err != nil {
+			return qol.EmotionResult{}, err
 		}
-		bySpan[event.Span] = &utterance{text: translation.Text, source: translation.Prosody}
-		order = append(order, event.Span)
+		return wire.ReadEmotionResult(reader)
 	}
-	for _, event := range bus.channel(qol.ChannelTTSAudio) {
-		if event.Type != qol.TypeAudioPCM {
-			continue
-		}
-		audio, err := wire.UnmarshalAudio(event.Payload)
-		if err != nil {
-			t.Fatal(err)
-		}
-		target := bySpan[event.Span]
-		if target == nil {
-			t.Fatalf("TTS audio for unknown span %+v", event.Span)
-		}
-		for index := 0; index+1 < len(audio.Data); index += 2 {
-			target.samples = append(target.samples, int16(binary.LittleEndian.Uint16(audio.Data[index:])))
-		}
-	}
-	var report carryThrough
-	var sourceRate, outputRate, sourceEnergy, outputEnergy, sourcePitch, outputPitch []float64
-	for _, span := range order {
-		item := bySpan[span]
-		report.utterances++
-		if item.source == nil {
-			continue
-		}
-		report.annotated++
-		measured := prosody.Analyze(item.samples, worker.SynthesisSampleRate, prosody.CountSyllables(item.text, "es"))
-		t.Logf("%6.1fs src rate=%.2f relE=%+.1fdB relP=%+.1fst arousal=%.2f markers=%v | out rate=%.2f E=%.1fdB P=%.0fHz | %s",
-			time.Duration(span.Start).Seconds(), item.source.RelativeRate, item.source.RelativeEnergyDB, item.source.RelativePitchSemitones, item.source.Arousal, item.source.Markers,
-			measured.Rate, measured.EnergyDB, measured.PitchHz, item.text)
-		if item.source.Rate == 0 || measured.Rate == 0 || measured.PitchHz == 0 {
-			continue
-		}
-		sourceRate = append(sourceRate, float64(item.source.RelativeRate))
-		outputRate = append(outputRate, measured.Rate)
-		sourceEnergy = append(sourceEnergy, float64(item.source.RelativeEnergyDB))
-		outputEnergy = append(outputEnergy, measured.EnergyDB)
-		sourcePitch = append(sourcePitch, float64(item.source.RelativePitchSemitones))
-		outputPitch = append(outputPitch, 12*math.Log2(measured.PitchHz))
-	}
-	report.rate = pearson(sourceRate, outputRate)
-	report.energy = pearson(sourceEnergy, outputEnergy)
-	report.pitch = pearson(sourcePitch, outputPitch)
-	return report
 }
 
-func pearson(left, right []float64) float64 {
-	if len(left) < 3 || len(left) != len(right) {
-		return math.NaN()
+func writeSynthesisFixture(t *testing.T, path string, utterances []evaluation.Utterance) {
+	t.Helper()
+	var buffer bytes.Buffer
+	for _, item := range utterances {
+		if err := wire.WriteSynthesisRequest(&buffer, qol.SynthesisRequest{Text: item.Text, Language: item.Language, Prosody: item.Source}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	var meanLeft, meanRight float64
-	for index := range left {
-		meanLeft += left[index]
-		meanRight += right[index]
+	if err := os.WriteFile(path, buffer.Bytes(), 0o640); err != nil {
+		t.Fatal(err)
 	}
-	meanLeft /= float64(len(left))
-	meanRight /= float64(len(right))
-	var covariance, varianceLeft, varianceRight float64
-	for index := range left {
-		covariance += (left[index] - meanLeft) * (right[index] - meanRight)
-		varianceLeft += (left[index] - meanLeft) * (left[index] - meanLeft)
-		varianceRight += (right[index] - meanRight) * (right[index] - meanRight)
+	t.Logf("synthesis fixture: %s (%d requests)", path, len(utterances))
+}
+
+func timelineFromEnv(t *testing.T) worker.Timeline {
+	t.Helper()
+	timeline := worker.DefaultTimeline()
+	if value := os.Getenv("QOL_E2E_PLAYOUT_DELAY"); value != "" {
+		delay, err := time.ParseDuration(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		timeline.Delay = delay
 	}
-	if varianceLeft == 0 || varianceRight == 0 {
-		return math.NaN()
+	if value := os.Getenv("QOL_E2E_MAX_PACE"); value != "" {
+		pace, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		timeline.MaxPace = pace
 	}
-	return covariance / math.Sqrt(varianceLeft*varianceRight)
+	return timeline
+}
+
+func emotionStage(python, processors string) worker.LiveProcessor {
+	if python == "" {
+		return nil
+	}
+	return worker.NewCommandProcessor(python, filepath.Join(processors, "emotion_emotion2vec.py"))
 }
 
 func envOr(name, fallback string) string {

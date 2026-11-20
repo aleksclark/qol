@@ -59,13 +59,14 @@ services:
   prosody:
     build:
       context: .
-      dockerfile: docker/go.dev.Dockerfile
+      dockerfile: docker/prosody.Dockerfile
     command: ["air", "-c", ".air.worker.toml"]
     environment:
       QOL_NATS_URL: nats://nats:4222
       QOL_TYPE: prosody
     volumes:
       - .:/app
+      - ./e2e/processors:/processors:ro
       - go-cache:/go/pkg/mod
     depends_on:
       - nats

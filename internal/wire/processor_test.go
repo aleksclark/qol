@@ -28,6 +28,9 @@ func sampleProsody() *qol.Prosody {
 		Emotion:                "happy",
 		EmotionConfidence:      0.8,
 		Markers:                []string{"fast", "loud"},
+		EmotionScores:          []qol.EmotionScore{{Label: "happy", Score: 0.8}, {Label: "neutral", Score: 0.2}},
+
+		RelativePitchRangeSemitones: 2.5,
 	}
 }
 
@@ -66,6 +69,8 @@ func TestRejectsInvalidProsody(t *testing.T) {
 		"negative rate": func(p *qol.Prosody) { p.Rate = -1 },
 		"arousal":       func(p *qol.Prosody) { p.Arousal = 1.5 },
 		"voiced":        func(p *qol.Prosody) { p.VoicedRatio = -0.1 },
+		"emotion score": func(p *qol.Prosody) { p.EmotionScores[0].Score = 2 },
+		"emotion label": func(p *qol.Prosody) { p.EmotionScores[0].Label = "" },
 	} {
 		prosody := sampleProsody()
 		mutate(prosody)
@@ -78,7 +83,7 @@ func TestRejectsInvalidProsody(t *testing.T) {
 func TestProcessorFramesRoundTrip(t *testing.T) {
 	var buffer bytes.Buffer
 	utterance := qol.Utterance{Span: qol.Span{Start: 1_000_000_000, End: 2_500_000_000}, Text: "good morning"}
-	request := qol.SynthesisRequest{Text: "buenos días", Language: "es", Prosody: sampleProsody()}
+	request := qol.SynthesisRequest{Text: "buenos días", Language: "es", Prosody: sampleProsody(), Pace: 1.2}
 	chunk := qol.SynthesisChunk{Audio: qol.Audio{Format: qol.PCMFormat{SampleRate: 22050, Channels: 1, Format: qol.SampleS16LE}, Data: []byte{1, 2, 3, 4}}, EndOfUtterance: true}
 	if err := wire.WriteUtterance(&buffer, utterance); err != nil {
 		t.Fatal(err)
@@ -114,5 +119,32 @@ func TestRejectsInvalidProcessorFrames(t *testing.T) {
 	}
 	if err := wire.WriteSynthesisChunk(&buffer, qol.SynthesisChunk{}); err == nil {
 		t.Fatal("expected missing format to fail")
+	}
+}
+
+func TestEmotionFramesRoundTrip(t *testing.T) {
+	var buffer bytes.Buffer
+	audio := qol.Audio{Format: qol.PCMFormat{SampleRate: 16000, Channels: 1, Format: qol.SampleS16LE}, Data: []byte{1, 2, 3, 4}}
+	result := qol.EmotionResult{Label: "angry", Confidence: 0.7, Scores: []qol.EmotionScore{{Label: "angry", Score: 0.7}, {Label: "neutral", Score: 0.3}}}
+	if err := wire.WriteEmotionRequest(&buffer, audio); err != nil {
+		t.Fatal(err)
+	}
+	if err := wire.WriteEmotionResult(&buffer, result); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(&buffer)
+	gotAudio, err := wire.ReadEmotionRequest(reader)
+	if err != nil || !reflect.DeepEqual(gotAudio, audio) {
+		t.Fatalf("unexpected emotion request: %#v, %v", gotAudio, err)
+	}
+	gotResult, err := wire.ReadEmotionResult(reader)
+	if err != nil || !reflect.DeepEqual(gotResult, result) {
+		t.Fatalf("unexpected emotion result: %#v, %v", gotResult, err)
+	}
+	if err := wire.WriteEmotionResult(&buffer, qol.EmotionResult{Label: "happy", Confidence: 1.5}); err == nil {
+		t.Fatal("expected out-of-range confidence to fail")
+	}
+	if err := wire.WriteSynthesisRequest(&buffer, qol.SynthesisRequest{Text: "hola", Language: "es", Pace: -1}); err == nil {
+		t.Fatal("expected negative pace to fail")
 	}
 }

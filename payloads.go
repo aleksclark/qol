@@ -49,8 +49,22 @@ type Prosody struct {
 
 	Emotion           string
 	EmotionConfidence float32
+	EmotionScores     []EmotionScore
+
+	RelativePitchRangeSemitones float32
 
 	Markers []string
+}
+
+type EmotionScore struct {
+	Label string
+	Score float32
+}
+
+type EmotionResult struct {
+	Label      string
+	Confidence float32
+	Scores     []EmotionScore
 }
 
 type Speaker struct {
@@ -84,6 +98,7 @@ type SynthesisRequest struct {
 	Text     string
 	Language string
 	Prosody  *Prosody
+	Pace     float32
 }
 
 type SynthesisChunk struct {

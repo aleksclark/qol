@@ -20,9 +20,13 @@ job "qol-qwen3-tts-bench" {
         image      = "docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04"
         entrypoint = ["/bin/bash", "-lc"]
         args = [
-          "apt-get update -qq && apt-get install -y -qq python3-venv sox >/dev/null && python3 -m venv /opt/bench && /opt/bench/bin/pip install -q --extra-index-url https://download.pytorch.org/whl/cu128 torch torchaudio qwen-tts && /opt/bench/bin/python $${NOMAD_TASK_DIR}/qwen3_tts_bench.py",
+          "apt-get update -qq && apt-get install -y -qq python3-venv sox >/dev/null && python3 -m venv /opt/bench && /opt/bench/bin/pip install -q --extra-index-url https://download.pytorch.org/whl/cu126 torch==2.8.0 torchaudio==2.8.0 qwen-tts && /opt/bench/bin/python $${NOMAD_TASK_DIR}/qwen3_tts_bench.py",
         ]
         shm_size = 4294967296
+      }
+
+      env {
+        QOL_BENCH_DTYPE = "float32"
       }
 
       template {

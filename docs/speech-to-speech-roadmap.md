@@ -4,18 +4,22 @@ Goal: live, low-latency English-to-Spanish speech translation that carries the s
 
 ## Where the system stands
 
-| Area | Before | Now |
-| --- | --- | --- |
-| Source delivery | Not measured; `ProsodyPayload` existed but was never produced | `prosody` stage measures every utterance (pitch, level, syllable rate, pauses, pitch range, emphasis, acoustic arousal) and attaches it to the text |
-| Media alignment | Text events carried the cumulative stream span | STT emits per-utterance source spans; translate and TTS keep them |
-| Translate / TTS processes | One process per utterance; translate reloaded its model every time | One long-lived process per worker with protobuf/line framing |
-| TTS | espeak-ng, fixed voice | Kokoro-82M (CPU in the dev stack), speed and loudness follow the speaker; espeak and Qwen3-TTS processors use the same protocol |
-| Tests | Startup-only Compose e2e; opt-in real graph with no quality check | Unit tests for analysis and stages; opt-in real graph reports source-to-output carry-through correlation |
+| Area | Originally | Round 1 (PR #4) | Round 2 |
+| --- | --- | --- | --- |
+| Source delivery | Not measured | Pitch, level, syllable rate, pauses, range, emphasis, acoustic arousal per utterance | Adds relative pitch range and categorical emotion from emotion2vec+ (CPU, ~0.15 s per utterance) |
+| Segmentation | 0.6–1.2 s silence or 5 s cap | Same, with utterance spans | Online punctuation and casing; clause-boundary early commits; 4 s cap |
+| Translation | opus-mt-en-es, model reloaded per utterance | Long-lived process | opus-mt-tc-big-en-es, beam 4, on punctuated input |
+| TTS | espeak-ng, fixed voice | Kokoro speed and gain follow the speaker | Kokoro pitch level and range set inside the model's F0 predictor |
+| Timing | Back-to-back output | Back-to-back output | Output scheduled on the source timeline: silence when ahead, faster pace while behind |
+| Evaluation | Startup-only | Opt-in real graph with rate/level/pitch correlation | Adds range correlation, onset lag, emotion agreement, synthesis fixtures, `qol-eval`, and Nomad GPU jobs |
 
 ## Hardware
 
-- Local: RTX 3060 12 GB (Ampere, bf16). Local Docker is rootless with no NVIDIA runtime, so GPU processors run as host processes.
-- Nomad `node-6`: two Tesla V100-SXM2-16GB (compute 7.0: fp16 only, no FlashAttention 2) plus a Quadro M2000. After the node's reboot on 2026-11-18 the NVIDIA device plugin and Docker runtime expose both V100s (`device "nvidia/gpu"` with `${device.model} = "Tesla V100-SXM2-16GB"`). Both were allocated to `audiobook-gpu2` dispatches during this work, so no V100 benchmark was run. `deploy/nomad/qwen3-tts-bench.nomad.hcl` is ready.
+- Local: RTX 3060 12 GB (Ampere, bf16). Local Docker is rootless with no NVIDIA runtime, so GPU processors run as host processes. The desktop and other applications commonly hold 3–5 GB, so 4B-parameter models do not fit beside them.
+- Nomad `node-6`: two Tesla V100-SXM2-16GB plus a Quadro M2000, exposed through the NVIDIA device plugin (`device "nvidia/gpu"` with `${device.model} = "Tesla V100-SXM2-16GB"`). Volta constraints found in practice:
+  - PyTorch cu128+ wheels omit sm_70 (`no kernel image is available`); use cu126 (torch 2.8) or cu124.
+  - `torch.cuda.is_bf16_supported()` reports True through emulation; Qwen3-TTS then fails. fp16 trips a device-side assert in its sampler, so it only runs in fp32.
+  - Jobs share a `qol-python-cache` Docker volume to avoid re-downloading wheels and models.
 - Other Nomad nodes are CPU-only.
 
 ## Model survey
@@ -39,20 +43,23 @@ No open direct model does live en→es with prosody transfer today. A direct mod
 
 | Stage | Candidate | Prosody input/output | Notes |
 | --- | --- | --- | --- |
-| ASR | sherpa-onnx streaming Zipformer (current) | Utterance spans | CPU, 0.6–1.2 s endpointing; uppercase without punctuation (now case-normalized before translation) |
+| ASR | sherpa-onnx streaming Zipformer (current) | Utterance spans, token timestamps | CPU; greedy output is append-only, so clause-boundary early commits are safe |
+| Punctuation | sherpa-onnx online CNN-BiLSTM punctuation (current, verified) | Restores punctuation and casing | ~5 ms per utterance on CPU; drives early commits |
 | ASR | Kyutai STT 1B (en/fr), Parakeet TDT 0.6B v3, Canary-1B-v2 | Word timestamps | GPU upgrades; Canary also does en→es speech translation directly |
-| Emotion | emotion2vec+ (MIT) | Categorical emotion | Fills `ProsodyPayload.emotion`; fits CPU or either GPU |
+| Emotion | emotion2vec+ base (MIT, current, verified) | Categorical emotion and scores | ~0.1–0.3 s per utterance on CPU; also used as the output judge |
 | Emotion | audEERING wav2vec2 A/V/D | Arousal/valence/dominance | Research-only license |
-| Translation | opus-mt-en-es CTranslate2 (current) | None | Fast but weak (see transcripts below) |
-| Translation | NLLB/MADLAD, small instruct LLM on a V100 | Can preserve emphasis markup | Next quality step |
-| TTS | Kokoro-82M (verified) | Numeric `speed`; gain applied after synthesis | Apache 2.0; Spanish voices; RTF 0.016 on 3060, 0.1–0.2 on CPU |
+| Translation | opus-mt-tc-big-en-es CTranslate2 int8 (current, verified) | None | Best quality per millisecond in the WMT13 check below |
+| Translation | MADLAD-400 3B, Qwen3-4B-Instruct (verified) | LLM could keep emphasis markup | Slower and not better on this test |
+| TTS | Kokoro-82M (current, verified) | Numeric `speed`; F0 predictor shift and range; gain after synthesis | Apache 2.0; Spanish voices; RTF 0.016 on 3060, 0.1–0.2 on CPU |
 | TTS | Qwen3-TTS 12Hz CustomVoice 0.6B/1.7B (verified) | Natural-language `instruct` | Apache 2.0; Spanish; open package has no streaming generation; see measurements |
 | TTS | CosyVoice 3 0.5B | Instructions plus bidirectional streaming | Spanish listed; next expressive candidate to evaluate |
-| TTS | Chatterbox Multilingual 0.5B | `exaggeration`, `cfg_weight` (pace), voice clone | MIT; Spanish; numeric emotion intensity |
+| TTS | Chatterbox Multilingual 0.5B (verified on V100) | `exaggeration`, `cfg_weight` (pace), voice clone | MIT; Spanish; RTF ~1.0 on V100; needs `setuptools<81` for its watermarker |
 | TTS | IndexTTS 2 | Explicit duration and 8-way emotion vector | Bilibili license; Spanish support unverified |
 | TTS | Fish S2/OpenAudio, Higgs Audio, VibeVoice | Inline emotion tags | Restrictive licenses or unverified Spanish |
 
 ## Measurements
+
+### Round 1
 
 90 s of the sermon sample through the real graph (`e2e/graph_test.go`), 23 utterances, all annotated. Correlation is Pearson between the source utterance's relative value and the synthesized Spanish measurement.
 
@@ -73,33 +80,90 @@ Conclusions:
 2. Speed and loudness transfer now work at live latency. Pitch contour and emotion are the gap.
 3. The translation model is the largest quality problem in the transcripts.
 
+### Round 2
+
+**Translation** (`e2e/bench/translation_eval.py`, first 300 sentences of WMT13 en→es, chrF++ / BLEU). "ASR" lowercases and strips punctuation like the recognizer; "+punct" restores it with the online punctuation model.
+
+| Model | Hardware | Clean | ASR | ASR + punct | Median latency |
+| --- | --- | --- | --- | --- | --- |
+| opus-mt-en-es (round 1) | CPU int8 | 59.5 / 36.7 | 54.2 / 25.7 | 55.3 / 28.8 | 49 ms |
+| opus-mt-tc-big-en-es (now) | CPU int8 | 59.9 / 37.0 | 55.6 / 28.3 | 56.2 / 29.9 | 164 ms |
+| MADLAD-400 3B | RTX 3060 bf16 | 60.9 / 38.6 | 55.8 / 27.8 | 56.7 / 30.7 | 697 ms |
+| Qwen3-4B-Instruct-2507 | V100 fp16 | 57.4 / 33.5 | 55.4 / 28.8 | 54.7 / 27.5 | ~1.5 s |
+
+Restoring punctuation is worth about +1 chrF and +1.5–3 BLEU for the dedicated MT models; the LLM copes with unpunctuated input and slightly prefers it. The bigger Marian model adds about +1 chrF at 160 ms on CPU. Neither the 3B MT model nor the 4B LLM justifies its latency.
+
+**Graph** (same 90 s, Kokoro on CPU, final defaults: punctuation commits after 5 words, 4 s cap, 1 s playout delay, pace up to 1.4):
+
+| Configuration | Utterances | Rate r | Level r | Pitch r | Range r | Onset lag median / p90 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Round 1 (speed and gain only, back-to-back output) | 23 | 0.72 | 0.96 | 0.33 | n/a | n/a |
+| + Kokoro F0 control | 23 | 0.73 | 0.96 | 0.91 | n/a | n/a |
+| + timeline, 1.5 s delay, 5 s cap, no punctuation | 23 | 0.77 | 0.94 | 0.86 | 0.78 | 6.9 s / 7.9 s |
+| + punctuation commits (8 words), 1 s delay, pace 1.4 | 31 | 0.71 | 0.98 | 0.88 | 0.79 | 6.0 s / 6.7 s |
+| + commits after 5 words, 4 s cap (defaults) | 39 | 0.75–0.80 | 0.97–0.98 | 0.72–0.77 | 0.75–0.77 | 4.9–5.1 s / 5.5–6.0 s |
+| 3 s cap, 0.8 s delay | 37 | 0.80 | 0.97 | 0.76 | 0.90 | 4.3 s / 5.5 s |
+
+Onset lag runs from the start of the English utterance to the start of the Spanish speech for it, so its floor is the utterance length plus the playout delay. Shorter segments lower lag but hand the translator sentence fragments.
+
+**Expressive TTS on the fleet** (same 39-utterance fixture, scored with `qol-eval`):
+
+| TTS | Hardware | RTF | Rate r | Level r | Pitch r | Range r | Non-neutral emotion carried |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Kokoro with speed, F0, gain | CPU | 0.1–0.25 | 0.76 | 0.98 | 0.77 | 0.75 | 1 / 11 |
+| Chatterbox Multilingual, `exaggeration` from arousal, `cfg_weight` from rate | V100 fp32 | 1.02 | 0.19 | 0.53 | −0.06 | 0.23 | 0 / 11 |
+| Qwen3-TTS 0.6B / 1.7B CustomVoice (benchmark sentence) | V100 fp32 | 2.1 | 1.7B: "slow" instructions ~47% longer than "fast" | | | | |
+
+**Live dev stack** (NATS, Docker, all CPU, emotion on): a 60 s clip streamed at playback rate. The time-aligned Spanish track was 63.3 s long, and both files were written 1.1 s after the source ended. Scheduled lag was 2.9–6.0 s, and no warnings or errors were logged.
+
+Conclusions:
+
+1. Speed, loudness, pitch level, and pitch range now carry through at live latency on CPU.
+2. Categorical emotion does not carry with any model tried. The source classifier works, but neither Kokoro's numeric controls nor Chatterbox's `exaggeration` reproduces an angry or happy reading in Spanish. Note that emotion2vec+ labels emphatic preaching as angry or happy fairly often, so its judgments need a human-labelled check.
+3. Expressive autoregressive TTS (Qwen3-TTS, Chatterbox) runs at or slower than real time on the available GPUs, so it cannot sit on the live path yet.
+4. Lag is now dominated by segment length. Going below ~4 s needs streaming translation, not further tuning.
+
 ## Next steps
 
-1. **Emotion classification.** Add an emotion2vec+ processor behind the prosody stage to fill `emotion`/`emotion_confidence` per utterance. Gate on the carry-through test plus a labelled clip set.
-2. **Pitch and emphasis on the fast path.** Apply relative pitch and range to Kokoro output (WORLD/pyworld F0 rescaling per utterance), then evaluate numeric-control expressive models: Chatterbox `exaggeration` from arousal, CosyVoice 3 streaming with instructions, IndexTTS 2 duration and emotion vectors if Spanish holds up. Keep the processor protocol; add a model only if it beats Kokoro on the carry-through test without breaking RTF < 0.3.
-3. **Playout scheduling.** Schedule TTS output against source spans (`ProsodyPayload.pause_before_ms`, span start) so pauses transfer and lag stays bounded; let speed absorb backlog. Record ear-to-ear lag per utterance as a metric.
-4. **Latency.** Emit partial STT hypotheses and tune endpointing (currently 0.6 s trailing silence); evaluate Kyutai STT 1B or Parakeet on the 3060. Stream TTS segments (Kokoro already yields per segment).
-5. **Translation quality.** Add punctuation and casing before translation (sherpa-onnx online punctuation), then compare NLLB/MADLAD and a small instruct LLM on a V100 that can keep emphasis markers in the target text.
-6. **Fleet GPU serving.** When the V100s are free, run `nomad job run deploy/nomad/qwen3-tts-bench.nomad.hcl` from the repository root to measure fp16 Volta throughput. Moving a TTS or translation worker onto `node-6` also needs NATS reachable from the fleet, which the dev stack does not expose.
-7. **Direct-model track.** Use SeamlessStreaming as a latency baseline. Start a Hibiki fine-tune study for en→es, generating aligned training pairs with this cascade, and keep it separate from production until it beats the cascade on the same carry-through and latency gates.
+1. **Emotion by reference audio.** Send the source utterance's audio (or a clip from an emotion-matched bank) to the synthesizer as a style reference. Candidates are Chatterbox's `audio_prompt_path`, IndexTTS 2's separate emotion prompt (check Spanish), and CosyVoice 3. Keep Kokoro as the live fallback. Judge with the emotion-agreement metric plus a human-labelled set.
+2. **Faster expressive synthesis.** Expressive models need RTF below 0.3. Try CosyVoice 3 streaming with vLLM, and TensorRT/vLLM serving for Chatterbox on the V100s.
+3. **Streaming translation.** Use wait-k or retranslation over the append-only ASR prefix so speech can start before a clause finishes. Evaluate on both lag and chrF.
+4. **ASR upgrade.** Compare Kyutai STT 1B and Parakeet TDT against Zipformer for accuracy and word timing. Word timing would enable word-level emphasis transfer.
+5. **Fleet serving.** To run workers on `node-6`, NATS must be reachable from the fleet. Either deploy NATS on Nomad or expose the dev NATS port.
+6. **Direct-model track.** Use SeamlessStreaming as a lag baseline. Start a Hibiki fine-tune study for en→es, with the cascade generating aligned training pairs.
 
-## Running the carry-through test
+## Running the evaluations
 
-Host processors use separate virtual environments because Qwen3-TTS and Kokoro pin different libraries:
+Host processors use separate virtual environments because the TTS models pin different libraries:
 
 ```sh
 uv venv ~/.cache/qol/proc-venv
 VIRTUAL_ENV=~/.cache/qol/proc-venv uv pip install sherpa-onnx numpy ctranslate2==4.8.1 sentencepiece==0.2.1 huggingface-hub==0.36.0 'protobuf>=7.36.1,<8'
 uv venv ~/.cache/qol/kokoro-venv
 VIRTUAL_ENV=~/.cache/qol/kokoro-venv uv pip install kokoro==0.9.4 'misaki[en]==0.9.4' scipy 'protobuf>=7.36.1,<8'
-
-QOL_RUN_REAL_GRAPH_E2E=1 \
-QOL_SHERPA_MODEL=$HOME/.cache/qol/models/sherpa-onnx-streaming-zipformer-en-2023-06-26 \
-QOL_TRANSLATE_MODEL=$HOME/.cache/sermon_translate/opus-mt-en-es-ct2 \
-QOL_E2E_SAMPLE=/path/to/english.mp3 QOL_E2E_SECONDS=90 \
-QOL_E2E_TTS_PYTHON=$HOME/.cache/qol/kokoro-venv/bin/python QOL_E2E_TTS_PROCESSOR=tts_kokoro.py \
-QOL_E2E_MIN_RATE_CORRELATION=0.6 \
-go test -count=1 -v -timeout 30m ./e2e/
+uv venv ~/.cache/qol/emo-venv
+VIRTUAL_ENV=~/.cache/qol/emo-venv uv pip install --extra-index-url https://download.pytorch.org/whl/cpu 'torch==2.8.0+cpu' 'torchaudio==2.8.0+cpu' funasr huggingface-hub 'protobuf>=7.36.1,<8'
 ```
 
-Use `QOL_E2E_TTS_PROCESSOR=tts_spanish.py` for espeak-ng, or `tts_qwen.py` with a Qwen venv (`qwen-tts`, `protobuf>=7.36.1,<8`) and `QOL_QWEN_TTS_SPEAKER`. The test logs per-utterance source and output measurements, the correlations, and the Spanish Ogg/Opus path.
+Download the Zipformer and punctuation models from the sherpa-onnx releases into `~/.cache/qol/models`. Convert `Helsinki-NLP/opus-mt-tc-big-en-es` with `ct2-transformers-converter --quantization int8` into `~/.cache/qol/models/opus-mt-tc-big-en-es-ct2`.
+
+Real graph, with gates:
+
+```sh
+QOL_RUN_REAL_GRAPH_E2E=1 QOL_SHERPA_MODEL=$HOME/.cache/qol/models/sherpa-onnx-streaming-zipformer-en-2023-06-26 QOL_PUNCT_MODEL=$HOME/.cache/qol/models/sherpa-onnx-online-punct-en-2024-08-06 QOL_E2E_SAMPLE=/path/to/english.mp3 QOL_E2E_SECONDS=90 QOL_E2E_TTS_PYTHON=$HOME/.cache/qol/kokoro-venv/bin/python QOL_E2E_TTS_PROCESSOR=tts_kokoro.py QOL_E2E_EMOTION_PYTHON=$HOME/.cache/qol/emo-venv/bin/python QOL_E2E_MIN_RATE_CORRELATION=0.6 QOL_E2E_MIN_PITCH_CORRELATION=0.6 QOL_E2E_MAX_P90_LAG=7s QOL_E2E_DUMP_SYNTHESIS=$PWD/tmp/fixtures/sermon90.bin go test -count=1 -v -timeout 30m ./e2e/
+```
+
+`QOL_E2E_PLAYOUT_DELAY`, `QOL_E2E_MAX_PACE`, `QOL_STT_COMMIT_WORDS`, and `QOL_STT_MAX_UTTERANCE` override the latency settings.
+
+A TTS on the V100 fleet, scored locally against the same fixture:
+
+```sh
+nomad job run -var processor=tts_chatterbox.py -var 'packages=chatterbox-tts setuptools==80.9.0' \
+  -var torch_index=https://download.pytorch.org/whl/cu124 -var fixture=tmp/fixtures/sermon90.bin \
+  deploy/nomad/tts-carry-through.nomad.hcl
+nomad alloc fs <alloc> tts/local/audio.bin > tmp/fixtures/sermon90-chatterbox.bin
+go run ./cmd/qol-eval carry-through --requests tmp/fixtures/sermon90.bin --audio tmp/fixtures/sermon90-chatterbox.bin \
+  --emotion-processor $HOME/.cache/qol/emo-venv/bin/python --emotion-processor-arg e2e/processors/emotion_emotion2vec.py
+```
+
+Translation quality on the fleet: `nomad job run -var 'models=Qwen/Qwen3-4B-Instruct-2507' deploy/nomad/translation-eval.nomad.hcl`. Locally: `python e2e/bench/translation_eval.py --models opus-mt-en-es,opus-mt-tc-big-en-es`, with `sacrebleu`, `ctranslate2`, `sherpa-onnx`, and `QOL_PUNCT_MODEL` set.

@@ -11,7 +11,9 @@ Qol is a streaming voice translation system with a Go control plane and stage wo
 - Protobuf lint/generation: `buf lint && buf generate` (Go plus Python processor bindings in `e2e/processors/gen`)
 - Development stack: run `task dev`. Dedicated worker images contain their processor dependencies and models.
 - Stop development: `task dev:down`; API data persists. Recorded Ogg/Opus files land in gitignored `tmp/`.
-- Real-model graph test (host processors, no NATS): see `docs/speech-to-speech-roadmap.md`; it is skipped unless `QOL_RUN_REAL_GRAPH_E2E=1` and reports source-to-output prosody carry-through.
+- Real-model graph test (host processors, no NATS): see `docs/speech-to-speech-roadmap.md`; it is skipped unless `QOL_RUN_REAL_GRAPH_E2E=1` and reports source-to-output prosody carry-through, onset lag, and (with `QOL_E2E_EMOTION_PYTHON`) emotion agreement. `QOL_E2E_DUMP_SYNTHESIS` writes a synthesis fixture for fleet TTS runs.
+- Offline scoring: `go run ./cmd/qol-eval carry-through --requests <fixture> --audio <chunks>`.
+- Fleet GPU jobs (run from the repository root): `deploy/nomad/tts-carry-through.nomad.hcl`, `deploy/nomad/translation-eval.nomad.hcl`, `deploy/nomad/qwen3-tts-bench.nomad.hcl`. Fetch outputs with `nomad alloc fs <alloc> <task>/local/<file>`.
 
 Full local gate:
 
@@ -35,10 +37,12 @@ The Compose e2e service is startup-only. It does not run model inference or the 
 - `cmd/qol-api`: Cobra entrypoint, NATS wiring, disk persistence, HTTP/HTTP3 lifecycle, and admin bootstrap.
 - `cmd/qol-worker`: composition root for one stage selected by `--type=capture|stt-whisper|prosody|translate|tts|record`. `--name`, `--input`, and `--output` distinguish record instances.
 - `cmd/qol-feed`: CLI that logs in, takes an upload ticket, and streams a file through WebTransport at playback rate like a live microphone.
+- `cmd/qol-eval`: scores synthesized audio against source prosody from a synthesis fixture.
 - Root package (`core.go`, `payloads.go`, `types.go`): transport-independent generic event, bus, stage, port, replay, and semantic payload contracts.
 - `internal/api`: protobuf HTTP auth and WebTransport upload. It publishes uploaded chunks to the capture subject and waits for both record completion events.
 - `internal/worker`: `qol.Stage` implementations, persistent subprocess adapters behind the generic bus boundary, and atomic Ogg/Opus storage.
 - `internal/prosody`: pure-Go source delivery analysis (YIN pitch, level, syllable rate, pauses) and per-session relative baselines.
+- `internal/evaluation`: carry-through correlation, onset lag, and emotion agreement shared by the real graph test and `qol-eval`.
 - `internal/eventbus`: core NATS publish/subscribe, queue groups, and protobuf serialization.
 - `internal/wire`: the only domain/protobuf conversion layer plus varint-delimited framing.
 - `internal/auth` and `internal/store`: users, sessions, one-use upload tickets, and memory/disk adapters.
@@ -58,14 +62,16 @@ Graph subjects are fixed:
 10. `qol.graph.record-en.completed`: English Ogg/Opus metadata.
 11. `qol.graph.record-es.completed`: Spanish Ogg/Opus metadata.
 
-Capture publishes each incoming audio-stream event onto its four output ports. STT, prosody, and `record-en` subscribe to their own input subjects. Prosody joins each STT utterance with the decoded source PCM covering its span; translate and TTS keep the utterance span and prosody on every output.
+Capture publishes each incoming audio-stream event onto its four output ports. STT, prosody, and `record-en` subscribe to their own input subjects. Prosody joins each STT utterance with the decoded source PCM covering its span, optionally asks an emotion classifier (`--processor` on the prosody worker), and forwards; translate and TTS keep the utterance span and prosody on every output. TTS schedules each utterance on the source timeline: it starts no earlier than `span.End + --playout-delay`, inserts silence when ahead, and raises `SynthesisRequest.pace` up to `--max-pace` while behind, so `record-es` is time-aligned with `record-en`.
 
 Every externally visible worker implements `qol.Stage` through `Spec()` and `Run(ctx, bus)`. Stage ports declare channels and accepted/produced semantic event types. Processors are long-lived subprocesses started once per stream (STT) or once per worker (translate, TTS) so models load once.
 
 ## Invariants and gotchas
 
 - Processor executables read stdin and write stdout. STT reads the source media stream and writes varint-delimited `RecognizedUtterance` frames; translation reads one English line and writes one Spanish line; TTS reads `SynthesisRequest` frames and writes `SynthesisChunk` frames of 22050 Hz mono S16LE ending with `end_of_utterance`. Python processors must call `claim_stdout()` before importing libraries that print. Do not provide fake inference fallbacks; missing processor configuration is a startup error.
-- Prosody values are measurements, not guesses: relative pitch/level are against the session baseline, relative rate is against `--reference-rate` syllables per second, and `emotion` stays empty until a classifier sets it. Text whose audio never arrives within `--prosody-timeout` is forwarded without prosody.
+- Prosody values are measurements, not guesses: relative pitch/level/range are against the session baseline, relative rate is against `--reference-rate` syllables per second, and `emotion` stays empty unless the classifier answers. Text whose audio never arrives within `--prosody-timeout`, or whose classifier fails, is forwarded without that data.
+- STT commits early at clause boundaries found by the online punctuation model (`QOL_PUNCT_MODEL`, `QOL_STT_COMMIT_WORDS`, `QOL_STT_MAX_UTTERANCE`). Streaming-transducer greedy output is append-only, which is what makes committing a word prefix safe.
+- Volta (V100) needs PyTorch wheels built for sm_70 (cu126 or older) and has no native bf16; check `torch.cuda.get_device_capability()` rather than `is_bf16_supported()`.
 - Record instances run ffmpeg with `libopus` and atomically rename a temporary Ogg stream into `QOL_OUTPUT_DIR/<session>-<name>.ogg`. Existing output is treated as a successful retry.
 - Event sequence numbers start at zero and are contiguous per session/channel. `Event.Span` carries source-media alignment independently from wall-clock `ProducedAt`.
 - Event IDs are deterministic SHA-256 hashes of NUL-separated stage/session/sequence identity.

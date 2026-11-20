@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,7 @@ type emitFunc func(eventType string, payload []byte) error
 type utteranceSession struct {
 	next   uint64
 	outSeq uint64
+	cursor qol.MediaTime
 }
 
 type UtteranceStage struct {
@@ -34,7 +36,7 @@ type UtteranceStage struct {
 	group     string
 	process   *persistentProcess
 	decode    func(qol.Event) (utteranceInput, error)
-	transform func(context.Context, utteranceInput, emitFunc) error
+	transform func(context.Context, qol.Event, *utteranceSession, utteranceInput, emitFunc) error
 	finish    func(emitFunc) error
 	now       func() time.Time
 	mu        sync.Mutex
@@ -50,7 +52,7 @@ func NewTranslate(processor LiveProcessor) *UtteranceStage {
 		},
 		group: "qol-translate", process: newPersistentProcess(processor), decode: decodeText, now: time.Now, sessions: make(map[string]*utteranceSession),
 	}
-	stage.transform = func(ctx context.Context, input utteranceInput, emit emitFunc) error {
+	stage.transform = func(ctx context.Context, _ qol.Event, _ *utteranceSession, input utteranceInput, emit emitFunc) error {
 		var spanish string
 		err := stage.process.exchange(ctx, func(writer io.Writer) error {
 			_, err := io.WriteString(writer, singleLine(input.text)+"\n")
@@ -82,7 +84,7 @@ func NewTranslate(processor LiveProcessor) *UtteranceStage {
 	return stage
 }
 
-func NewTTS(processor LiveProcessor) *UtteranceStage {
+func NewTTS(processor LiveProcessor, timeline Timeline) *UtteranceStage {
 	stage := &UtteranceStage{
 		spec: qol.StageSpec{
 			Name:    "tts",
@@ -92,9 +94,20 @@ func NewTTS(processor LiveProcessor) *UtteranceStage {
 		group: "qol-tts", process: newPersistentProcess(processor), decode: decodeTranslation, now: time.Now, sessions: make(map[string]*utteranceSession),
 	}
 	format := qol.PCMFormat{SampleRate: SynthesisSampleRate, Channels: 1, Format: qol.SampleS16LE}
-	stage.transform = func(ctx context.Context, input utteranceInput, emit emitFunc) error {
+	stage.transform = func(ctx context.Context, event qol.Event, session *utteranceSession, input utteranceInput, emit emitFunc) error {
+		slot := timeline.plan(session.cursor, event.Span)
+		for _, silence := range silencePCM(slot.silence, SynthesisSampleRate) {
+			payload, err := wire.MarshalAudio(qol.Audio{Format: format, Data: silence})
+			if err != nil {
+				return err
+			}
+			if err := emit(qol.TypeAudioPCM, payload); err != nil {
+				return err
+			}
+		}
+		produced := 0
 		err := stage.process.exchange(ctx, func(writer io.Writer) error {
-			return wire.WriteSynthesisRequest(writer, qol.SynthesisRequest{Text: singleLine(input.text), Language: "es", Prosody: input.prosody})
+			return wire.WriteSynthesisRequest(writer, qol.SynthesisRequest{Text: singleLine(input.text), Language: "es", Prosody: input.prosody, Pace: float32(slot.pace)})
 		}, func(reader *bufio.Reader) error {
 			for {
 				chunk, err := wire.ReadSynthesisChunk(reader)
@@ -105,6 +118,7 @@ func NewTTS(processor LiveProcessor) *UtteranceStage {
 					return fmt.Errorf("synthesizer must emit %d Hz mono S16LE, got %+v", SynthesisSampleRate, chunk.Audio.Format)
 				}
 				if len(chunk.Audio.Data) > 0 {
+					produced += len(chunk.Audio.Data)
 					payload, err := wire.MarshalAudio(chunk.Audio)
 					if err != nil {
 						return err
@@ -121,6 +135,8 @@ func NewTTS(processor LiveProcessor) *UtteranceStage {
 		if err != nil {
 			return fmt.Errorf("tts: %w", err)
 		}
+		session.cursor = slot.start + qol.MediaTime(pcmDuration(produced, SynthesisSampleRate))
+		slog.Info("tts scheduled utterance", "session", event.SessionID, "sequence", event.Seq, "lag", time.Duration(slot.start-event.Span.Start).Round(time.Millisecond), "silence", slot.silence.Round(time.Millisecond), "pace", slot.pace)
 		return nil
 	}
 	stage.finish = func(emit emitFunc) error {
@@ -170,7 +186,7 @@ func (s *UtteranceStage) handle(processContext, ctx context.Context, publisher q
 		})
 	}
 	if strings.TrimSpace(input.text) != "" {
-		if err := s.transform(processContext, input, emit); err != nil {
+		if err := s.transform(processContext, event, session, input, emit); err != nil {
 			return err
 		}
 	}

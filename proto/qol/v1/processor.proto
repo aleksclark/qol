@@ -15,10 +15,17 @@ message SynthesisRequest {
   string text = 1;
   string language = 2;
   ProsodyPayload prosody = 3;
+  float pace = 4;
 }
 
 message SynthesisChunk {
   PcmFormat format = 1;
   bytes data = 2;
   bool end_of_utterance = 3;
+}
+
+message EmotionResult {
+  string label = 1;
+  float confidence = 2;
+  repeated EmotionScore scores = 3;
 }

@@ -22,7 +22,7 @@ def load_model():
     model_id = os.environ.get("QOL_QWEN_TTS_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")
     if not torch.cuda.is_available():
         raise RuntimeError("Qwen3-TTS processor requires a CUDA GPU")
-    dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     return Qwen3TTSModel.from_pretrained(
         model_id,
         device_map=os.environ.get("QOL_QWEN_TTS_DEVICE", "cuda:0"),

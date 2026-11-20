@@ -1,7 +1,9 @@
 package worker
 
 import (
+	"bufio"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -39,6 +41,7 @@ type prosodySession struct {
 type ProsodyStage struct {
 	spec           qol.StageSpec
 	decoder        LiveProcessor
+	emotion        *persistentProcess
 	referenceRate  float64
 	timeout        time.Duration
 	now            func() time.Time
@@ -47,9 +50,13 @@ type ProsodyStage struct {
 	sessions       map[string]*prosodySession
 }
 
-func NewProsody(decoder LiveProcessor, referenceRate float64, timeout time.Duration) *ProsodyStage {
+func NewProsody(decoder, emotion LiveProcessor, referenceRate float64, timeout time.Duration) *ProsodyStage {
 	if timeout <= 0 {
 		timeout = DefaultProsodyTimeout
+	}
+	var classifier *persistentProcess
+	if emotion != nil {
+		classifier = newPersistentProcess(emotion)
 	}
 	return &ProsodyStage{
 		spec: qol.StageSpec{
@@ -60,7 +67,7 @@ func NewProsody(decoder LiveProcessor, referenceRate float64, timeout time.Durat
 			},
 			Outputs: []qol.Port{{Name: "output", Channel: qol.ChannelASRText, Types: []string{qol.TypeTextFinal}}},
 		},
-		decoder: decoder, referenceRate: referenceRate, timeout: timeout, now: time.Now, sessions: make(map[string]*prosodySession),
+		decoder: decoder, emotion: classifier, referenceRate: referenceRate, timeout: timeout, now: time.Now, sessions: make(map[string]*prosodySession),
 	}
 }
 
@@ -70,6 +77,9 @@ func (s *ProsodyStage) Spec() qol.StageSpec {
 
 func (s *ProsodyStage) Run(ctx context.Context, bus qol.Bus) error {
 	s.processContext = ctx
+	if s.emotion != nil {
+		defer s.emotion.Close()
+	}
 	text, err := bus.Subscribe(ctx, s.spec.Inputs[0].Channel, qol.SubscribeOptions{Group: "qol-prosody"}, func(eventContext context.Context, event qol.Event) error {
 		return s.handleText(eventContext, bus, event)
 	})
@@ -276,6 +286,17 @@ func (s *ProsodyStage) annotate(ctx context.Context, event qol.Event, session *p
 	session.spoken = true
 	result := session.tracker.Annotate(measurement, pause)
 	s.mu.Unlock()
+	if s.emotion != nil {
+		emotion, err := s.classify(segment)
+		if err != nil {
+			slog.Warn("emotion classifier failed; forwarding prosody without emotion", "session", event.SessionID, "sequence", event.Seq, "error", err)
+		} else {
+			result.Emotion, result.EmotionConfidence, result.EmotionScores = emotion.Label, emotion.Confidence, emotion.Scores
+			if emotion.Label != "neutral" && emotion.Confidence >= 0.5 {
+				result.Markers = append(result.Markers, emotion.Label)
+			}
+		}
+	}
 	if err := wire.ValidateProsody(&result); err != nil {
 		return nil, err
 	}
@@ -312,6 +333,27 @@ func (s *ProsodyStage) segment(ctx context.Context, session *prosodySession, sta
 	session.samples = append([]int16(nil), session.samples[keep:]...)
 	session.dropped = end
 	return segment, true, nil
+}
+
+func (s *ProsodyStage) classify(segment []int16) (qol.EmotionResult, error) {
+	data := make([]byte, len(segment)*2)
+	for index, sample := range segment {
+		binary.LittleEndian.PutUint16(data[index*2:], uint16(sample))
+	}
+	audio := qol.Audio{Format: qol.PCMFormat{SampleRate: ProsodySampleRate, Channels: 1, Format: qol.SampleS16LE}, Data: data}
+	processContext := s.processContext
+	if processContext == nil {
+		processContext = context.Background()
+	}
+	var result qol.EmotionResult
+	err := s.emotion.exchange(processContext, func(writer io.Writer) error {
+		return wire.WriteEmotionRequest(writer, audio)
+	}, func(reader *bufio.Reader) error {
+		var err error
+		result, err = wire.ReadEmotionResult(reader)
+		return err
+	})
+	return result, err
 }
 
 func sampleIndex(at qol.MediaTime) int64 {

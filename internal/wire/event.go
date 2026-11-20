@@ -86,6 +86,10 @@ func UnmarshalAudio(payload []byte) (qol.Audio, error) {
 	if err := proto.Unmarshal(payload, message); err != nil {
 		return qol.Audio{}, err
 	}
+	return audioFromProto(message)
+}
+
+func audioFromProto(message *qolv1.AudioPayload) (qol.Audio, error) {
 	if message.Format == nil || len(message.Data) == 0 {
 		return qol.Audio{}, errors.New("audio format and data are required")
 	}

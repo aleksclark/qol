@@ -263,9 +263,9 @@ func TestStagesCarryProsodyThroughTheGraph(t *testing.T) {
 	}))
 	synth := &synthesizer{}
 	capture := worker.NewCapture()
-	prosodyStage := worker.NewProsody(passthroughDecoder(), 4, time.Second)
+	prosodyStage := worker.NewProsody(passthroughDecoder(), nil, 4, time.Second)
 	translate := worker.NewTranslate(lineTranslator(func(string) string { return "hola" }))
-	tts := worker.NewTTS(synth)
+	tts := worker.NewTTS(synth, worker.Timeline{})
 	english := &store{directory: t.TempDir()}
 	spanish := &store{directory: t.TempDir()}
 	recordEN := worker.NewRecord("record-en", qol.ChannelRecordENInput, qol.ChannelRecordENCompleted, english)
@@ -337,14 +337,15 @@ func TestStagesCarryProsodyThroughTheGraph(t *testing.T) {
 	if !bytes.Equal(english.data, append(append([]byte(nil), source...), 0, 0)) {
 		t.Fatalf("unexpected english recording length %d", len(english.data))
 	}
-	if !bytes.Equal(spanish.data, append([]byte("pcm:hola"), 0, 0)) {
-		t.Fatalf("unexpected spanish recording: %q", spanish.data)
+	leading := make([]byte, 2*worker.SynthesisSampleRate*400/1000)
+	if !bytes.Equal(spanish.data, append(append(leading, []byte("pcm:hola")...), 0, 0)) {
+		t.Fatalf("Spanish speech must start where the source utterance ends: %d bytes", len(spanish.data))
 	}
 }
 
 func TestProsodyMeasuresPausesAndForwardsWithoutAudio(t *testing.T) {
 	bus := newMemoryBus()
-	stage := worker.NewProsody(passthroughDecoder(), 4, 50*time.Millisecond)
+	stage := worker.NewProsody(passthroughDecoder(), nil, 4, 50*time.Millisecond)
 	runStages(t, bus, stage)
 
 	early := textEvent(t, 0, qol.Span{Start: 0, End: qol.MediaTime(time.Second)}, "too early", false)
@@ -449,7 +450,7 @@ func TestTranslateRestartsAFailedProcessor(t *testing.T) {
 func TestTTSUsesOneProcessAndRejectsWrongFormats(t *testing.T) {
 	synth := &synthesizer{}
 	bus := newMemoryBus()
-	runStages(t, bus, worker.NewTTS(synth))
+	runStages(t, bus, worker.NewTTS(synth, worker.Timeline{}))
 	for sequence, text := range []string{"uno", "dos"} {
 		payload, err := wire.MarshalTranslation(qol.Translation{Text: text, SourceLanguage: "en", TargetLanguage: "es"})
 		if err != nil {
@@ -459,7 +460,7 @@ func TestTTSUsesOneProcessAndRejectsWrongFormats(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if synth.starts != 1 || len(synth.requests) != 2 {
+	if synth.starts != 1 || len(synth.requests) != 2 || synth.requests[0].Pace != 1 || synth.requests[1].Pace != 1 {
 		t.Fatalf("TTS must reuse one processor: starts=%d requests=%d", synth.starts, len(synth.requests))
 	}
 	if events := bus.channel(qol.ChannelTTSAudio); len(events) != 4 {
@@ -473,7 +474,7 @@ func TestTTSUsesOneProcessAndRejectsWrongFormats(t *testing.T) {
 		return wire.WriteSynthesisChunk(output, qol.SynthesisChunk{Audio: qol.Audio{Format: qol.PCMFormat{SampleRate: 24000, Channels: 1, Format: qol.SampleS16LE}, Data: []byte{1, 2}}, EndOfUtterance: true})
 	})
 	other := newMemoryBus()
-	runStages(t, other, worker.NewTTS(wrong))
+	runStages(t, other, worker.NewTTS(wrong, worker.Timeline{}))
 	payload, err := wire.MarshalTranslation(qol.Translation{Text: "tres", SourceLanguage: "en", TargetLanguage: "es"})
 	if err != nil {
 		t.Fatal(err)
@@ -487,5 +488,120 @@ func assertSpec(t *testing.T, spec qol.StageSpec, name, input, output string) {
 	t.Helper()
 	if spec.Name != name || len(spec.Inputs) == 0 || spec.Inputs[0].Channel != input || len(spec.Outputs) == 0 || spec.Outputs[0].Channel != output || len(spec.Inputs[0].Types) == 0 || len(spec.Outputs[0].Types) == 0 {
 		t.Fatalf("unexpected stage spec: %#v", spec)
+	}
+}
+
+func TestProsodyAddsClassifiedEmotion(t *testing.T) {
+	var mu sync.Mutex
+	var sampleCounts []int
+	classifier := liveFunc(func(input io.Reader, output io.Writer) error {
+		reader := bufio.NewReader(input)
+		for {
+			audio, err := wire.ReadEmotionRequest(reader)
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			sampleCounts = append(sampleCounts, len(audio.Data)/2)
+			mu.Unlock()
+			if err := wire.WriteEmotionResult(output, qol.EmotionResult{Label: "happy", Confidence: 0.9, Scores: []qol.EmotionScore{{Label: "happy", Score: 0.9}, {Label: "neutral", Score: 0.1}}}); err != nil {
+				return err
+			}
+		}
+	})
+	bus := newMemoryBus()
+	runStages(t, bus, worker.NewProsody(passthroughDecoder(), classifier, 4, time.Second))
+	if err := bus.Publish(context.Background(), audioEvent(t, qol.ChannelProsodyAudio, 0, voicePCM(time.Second, 160, 0.3), true)); err != nil {
+		t.Fatal(err)
+	}
+	if err := bus.Publish(context.Background(), textEvent(t, 0, qol.Span{End: qol.MediaTime(time.Second)}, "praise the lord", false)); err != nil {
+		t.Fatal(err)
+	}
+	text, err := wire.UnmarshalText(bus.waitFor(t, qol.ChannelASRText, 1)[0].Payload)
+	if err != nil || text.Prosody == nil {
+		t.Fatalf("missing prosody: %#v %v", text, err)
+	}
+	if text.Prosody.Emotion != "happy" || text.Prosody.EmotionConfidence != 0.9 || len(text.Prosody.EmotionScores) != 2 || !slices.Contains(text.Prosody.Markers, "happy") {
+		t.Fatalf("emotion not attached: %+v", text.Prosody)
+	}
+	if len(sampleCounts) != 1 || sampleCounts[0] != worker.ProsodySampleRate {
+		t.Fatalf("classifier must receive the utterance audio: %v", sampleCounts)
+	}
+}
+
+func TestProsodyForwardsWhenTheClassifierFails(t *testing.T) {
+	broken := liveFunc(func(io.Reader, io.Writer) error { return errors.New("model missing") })
+	bus := newMemoryBus()
+	runStages(t, bus, worker.NewProsody(passthroughDecoder(), broken, 4, time.Second))
+	if err := bus.Publish(context.Background(), audioEvent(t, qol.ChannelProsodyAudio, 0, voicePCM(time.Second, 160, 0.3), true)); err != nil {
+		t.Fatal(err)
+	}
+	if err := bus.Publish(context.Background(), textEvent(t, 0, qol.Span{End: qol.MediaTime(time.Second)}, "amen", false)); err != nil {
+		t.Fatal(err)
+	}
+	text, err := wire.UnmarshalText(bus.waitFor(t, qol.ChannelASRText, 1)[0].Payload)
+	if err != nil || text.Prosody == nil || text.Prosody.Emotion != "" || text.Prosody.PitchHz == 0 {
+		t.Fatalf("prosody must survive a classifier failure without inventing emotion: %#v %v", text.Prosody, err)
+	}
+}
+
+func TestTTSSchedulesUtterancesOnTheSourceTimeline(t *testing.T) {
+	var mu sync.Mutex
+	var paces []float32
+	threeSeconds := liveFunc(func(input io.Reader, output io.Writer) error {
+		reader := bufio.NewReader(input)
+		format := qol.PCMFormat{SampleRate: worker.SynthesisSampleRate, Channels: 1, Format: qol.SampleS16LE}
+		for {
+			request, err := wire.ReadSynthesisRequest(reader)
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			paces = append(paces, request.Pace)
+			mu.Unlock()
+			pcm := make([]byte, 3*2*worker.SynthesisSampleRate)
+			for offset := 0; offset < len(pcm); offset += 64 * 1024 {
+				end := min(offset+64*1024, len(pcm))
+				if err := wire.WriteSynthesisChunk(output, qol.SynthesisChunk{Audio: qol.Audio{Format: format, Data: pcm[offset:end]}, EndOfUtterance: end == len(pcm)}); err != nil {
+					return err
+				}
+			}
+		}
+	})
+	bus := newMemoryBus()
+	runStages(t, bus, worker.NewTTS(threeSeconds, worker.Timeline{Delay: time.Second, MaxPace: 1.5, CatchUpWindow: 2 * time.Second}))
+	seconds := func(value float64) qol.MediaTime { return qol.MediaTime(value * float64(time.Second)) }
+	spans := []qol.Span{{Start: 0, End: seconds(2)}, {Start: seconds(2), End: seconds(4)}, {Start: seconds(10), End: seconds(12)}}
+	for sequence, span := range spans {
+		payload, err := wire.MarshalTranslation(qol.Translation{Text: "hola", SourceLanguage: "en", TargetLanguage: "es"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := bus.Publish(context.Background(), qol.Event{ID: "es", SessionID: "session", Channel: qol.ChannelTranslationText, Type: qol.TypeTranslationFinal, Seq: uint64(sequence), Span: span, ProducedAt: time.Now(), Encoding: qol.EncodingProtobuf, Payload: payload}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !slices.Equal(paces, []float32{1, 1.25, 1}) {
+		t.Fatalf("pace must rise only while output is behind: %v", paces)
+	}
+	bytesBySpan := map[qol.Span]int{}
+	for _, event := range bus.channel(qol.ChannelTTSAudio) {
+		audio, err := wire.UnmarshalAudio(event.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bytesBySpan[event.Span] += len(audio.Data)
+	}
+	perSecond := 2 * worker.SynthesisSampleRate
+	for index, want := range []int{(3 + 3) * perSecond, 3 * perSecond, (4 + 3) * perSecond} {
+		if got := bytesBySpan[spans[index]]; got != want {
+			t.Fatalf("utterance %d: %d bytes of silence plus speech, want %d", index, got, want)
+		}
 	}
 }
