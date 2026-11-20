@@ -27,7 +27,9 @@ func main() {
 
 func newCommand() *cobra.Command {
 	command := &cobra.Command{Use: "qol-worker", Short: "Qol event worker"}
-	command.PersistentFlags().String("nats-url", nats.DefaultURL, "NATS server URL")
+	command.PersistentFlags().String("nats-url", nats.DefaultURL, "Comma-separated NATS server URLs")
+	command.PersistentFlags().String("nats-user", "", "NATS user")
+	command.PersistentFlags().String("nats-password", "", "NATS password; prefer QOL_NATS_PASSWORD")
 	runCommand := &cobra.Command{Use: "run", Short: "Run one streaming graph stage", RunE: run}
 	runCommand.Flags().String("type", "", "Stage type: capture, stt-whisper, prosody, translate, tts, or record")
 	runCommand.Flags().String("stage", "", "Deprecated alias for --type")
@@ -52,7 +54,7 @@ func run(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	connection, err := nats.Connect(settings.GetString("nats-url"))
+	connection, err := eventbus.Connect(eventbus.ConnectOptions{URLs: settings.GetString("nats-url"), User: settings.GetString("nats-user"), Password: settings.GetString("nats-password"), Name: "qol-worker-" + settings.GetString("type")})
 	if err != nil {
 		return err
 	}
