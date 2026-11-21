@@ -612,6 +612,7 @@ func TestTTSHoldsSpeechUntilDueAndAppliesReplacements(t *testing.T) {
 	bus := newMemoryBus()
 	options := worker.DefaultSpeechOptions()
 	options.Timeline = worker.Timeline{Delay: time.Second}
+	options.Coalesce = false
 	runStages(t, bus, worker.NewTTS(synth, options))
 	clock := func(at qol.MediaTime, sequence uint64) {
 		payload, err := wire.MarshalTelemetry(qol.Telemetry{Stage: "prosody", ConsumedThrough: at})

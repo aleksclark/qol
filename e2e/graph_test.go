@@ -188,6 +188,7 @@ func TestRealEnglishToSpanishAudioGraph(t *testing.T) {
 	t.Logf("wall=%s %s", elapsed.Round(time.Millisecond), report.Summary())
 	continuity := evaluation.Discontinuities(spanishTrack(t, bus), worker.SynthesisSampleRate)
 	joins := evaluation.PhraseJoins(utterances, 80*time.Millisecond)
+	t.Logf("phrasing: %d spoken phrases, %d ending mid-clause", joins.Count+1, evaluation.OpenEndings(utterances))
 	t.Logf("continuity: %d phrase joins, %d under 80 ms, shortest %s; %d onsets from digital silence (%.1f/min)", joins.Count, joins.Tight, joins.MinimumGap.Round(time.Millisecond), continuity.AbruptOnsets, continuity.OnsetsPerMin)
 	condensed := 0
 	for _, translation := range spanishTranslations(t, bus) {
@@ -305,6 +306,19 @@ func speechFromEnv(t *testing.T) worker.SpeechOptions {
 	t.Helper()
 	options := worker.DefaultSpeechOptions()
 	options.Timeline = timelineFromEnv(t)
+	if value := os.Getenv("QOL_E2E_CLAUSE_HOLD"); value != "" {
+		hold, err := time.ParseDuration(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		options.ClauseHold = hold
+	}
+	if os.Getenv("QOL_E2E_COALESCE") == "0" {
+		options.Coalesce = false
+		options.TrimSilence = false
+		options.Gaps = worker.PhraseGaps{}
+		options.Timeline.MinGap = 120 * time.Millisecond
+	}
 	return options
 }
 

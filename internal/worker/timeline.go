@@ -10,7 +10,7 @@ const (
 	DefaultPlayoutDelay   = time.Second
 	DefaultMaxPace        = 1.4
 	DefaultCatchUpWindow  = 5 * time.Second
-	DefaultMinGap         = 120 * time.Millisecond
+	DefaultMinGap         = 0
 	silenceChunkMaxBytes  = 64 * 1024
 	synthesisBytesPerTick = 2
 )

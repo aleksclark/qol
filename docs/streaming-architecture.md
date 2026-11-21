@@ -255,7 +255,28 @@ Observations:
 - **Translation:** the translator continues across fragments faithfully once told never to finish the speaker's sentence; an earlier prompt invented clauses. Per-fragment latency is 0.2–0.8 s on the 3060 with Hugging Face `generate`.
 - **Condensing:** it fires rarely on this clip, because lag stays near 5–6 s. Condensing a held backlog produced fluent but only modestly shorter Spanish in the probe (about 0.9 of the original), against 0.77 in the standalone spike.
 - **Phrase joins:** gaps between phrases were never under 80 ms, even without the minimum gap, because Kokoro pads each phrase.
-- **What remains audible:** Kokoro starts each phrase from digital silence (5–8 onsets per minute by `qol-eval continuity`, against 0 for natural English). Each phrase still gets its own intonation contour. Both need a TTS that streams text across phrases (P2).
+- **What remains audible:** Kokoro starts each phrase from digital silence (5–8 onsets per minute by `qol-eval continuity`, against 0 for natural English). Each phrase still gets its own intonation contour. Round 5 addresses this within the limits of a per-phrase synthesizer; the full fix needs a TTS that streams text across phrases (P2).
+
+### Phrase flow (round 5)
+
+Listening to the streamed output still revealed cuts inside sentences, so I measured them. Kokoro synthesizes each request separately with its own intonation and padding, and about half the spoken phrases ended mid-clause: 18 of 37 ended without `.?!,;:`.
+
+**Changes:**
+- **Clause merging:** TTS merges consecutive fragments (up to three) until one ends a clause. It waits up to `--clause-hold` on the source clock for the continuation.
+- **Padding:** it trims Kokoro's own leading and trailing padding.
+- **Gaps:** it pauses by punctuation: 350 ms after a sentence, 180 ms after a clause, 60 ms inside an unfinished one.
+- **Continuation mark:** a phrase it must speak while its clause is still open is sent with a trailing comma, so Kokoro uses a continuation contour instead of a final fall.
+
+Line translator, Kokoro on CPU, live-paced 90 s clip:
+
+| Clause hold | Spoken phrases | Phrases ending mid-clause | Onset lag median / p90 | Rate r | Pitch r |
+| --- | --- | --- | --- | --- | --- |
+| No merging (before) | 37 | 18 | 5.51 s / 6.61 s | 0.68 | 0.81 |
+| 1.0 s | 31 | 12 | 4.61 s / 6.18 s | 0.78 | 0.83 |
+| 1.5 s | 30 | 11 | 4.68 s / 6.81 s | 0.74 | 0.84 |
+| 2.5 s (default) | 25 | 6 | 5.34 s / 7.86 s | 0.74 | 0.68 |
+
+Trimming Kokoro's padding gives back more time than the shorter holds cost. A longer hold buys flow at roughly 1 s of p90 lag. With the LLM translator, a 2.5 s hold and up to six merged fragments reached 5 of 24, but p90 lag rose to 10 s and the conductor had to condense three times. That is why merging is capped at three fragments.
 
 **Not yet implemented:**
 - **P2:** CosyVoice 3 bi-streaming TTS with a spoken watermark.

@@ -19,22 +19,58 @@ import (
 
 const (
 	DefaultSynthesisLookahead = 2 * time.Second
-	DefaultFade               = 30 * time.Millisecond
+	DefaultFade               = 15 * time.Millisecond
 	DefaultProsodySmoothing   = 0.6
+	DefaultClauseHold         = 2500 * time.Millisecond
+	DefaultSentenceGap        = 350 * time.Millisecond
+	DefaultClauseGap          = 180 * time.Millisecond
+	DefaultContinuationGap    = 60 * time.Millisecond
 	spanishSyllablesPerSecond = 6.5
+	maxUnitItems              = 3
+	maxUnitRunes              = 280
+	trimMargin                = 20 * time.Millisecond
+	silenceThreshold          = 100
 )
 
+type PhraseGaps struct {
+	Sentence     time.Duration
+	Clause       time.Duration
+	Continuation time.Duration
+}
+
 type SpeechOptions struct {
-	Timeline   Timeline
-	JustInTime bool
-	ClockStage string
-	Lookahead  time.Duration
-	Fade       time.Duration
-	Smoothing  float64
+	Timeline    Timeline
+	JustInTime  bool
+	ClockStage  string
+	Lookahead   time.Duration
+	Fade        time.Duration
+	Smoothing   float64
+	Coalesce    bool
+	ClauseHold  time.Duration
+	Gaps        PhraseGaps
+	TrimSilence bool
 }
 
 func DefaultSpeechOptions() SpeechOptions {
-	return SpeechOptions{Timeline: DefaultTimeline(), JustInTime: true, ClockStage: "prosody", Lookahead: DefaultSynthesisLookahead, Fade: DefaultFade, Smoothing: DefaultProsodySmoothing}
+	return SpeechOptions{
+		Timeline:    DefaultTimeline(),
+		JustInTime:  true,
+		ClockStage:  "prosody",
+		Lookahead:   DefaultSynthesisLookahead,
+		Fade:        DefaultFade,
+		Smoothing:   DefaultProsodySmoothing,
+		Coalesce:    true,
+		ClauseHold:  DefaultClauseHold,
+		Gaps:        PhraseGaps{Sentence: DefaultSentenceGap, Clause: DefaultClauseGap, Continuation: DefaultContinuationGap},
+		TrimSilence: true,
+	}
+}
+
+type speechUnit struct {
+	items   []*speechItem
+	event   qol.Event
+	text    string
+	prosody *qol.Prosody
 }
 
 type speechItem struct {
@@ -56,6 +92,9 @@ type speechSession struct {
 	final        *qol.Event
 	smoothed     *qol.Prosody
 	wake         chan struct{}
+	gap          time.Duration
+	holding      bool
+	holdStart    qol.MediaTime
 }
 
 type SpeechStage struct {
@@ -274,32 +313,100 @@ func (s *SpeechStage) speak(session *speechSession) {
 			}
 		}
 		if err := s.synthesize(session, item); err != nil {
-			slog.Error("tts synthesis failed", "session", session.id, "sequence", item.sequence, "error", err)
+			slog.Error("tts synthesis failed", "session", session.id, "sequence", item.items[0].sequence, "error", err)
 		}
 		s.publishTelemetry(session)
 	}
 }
 
-func (s *SpeechStage) nextDue(session *speechSession) (*speechItem, bool) {
+func (s *SpeechStage) nextDue(session *speechSession) (*speechUnit, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(session.queue) == 0 {
 		return nil, session.final != nil
 	}
 	head := session.queue[0]
-	if s.options.JustInTime && session.final == nil {
-		slot := s.options.Timeline.plan(session.cursor, head.event.Span)
+	timeline := s.timelineLocked(session)
+	waiting := s.options.JustInTime && session.final == nil
+	if waiting {
+		slot := timeline.plan(session.cursor, head.event.Span)
 		if !session.clockKnown || time.Duration(slot.start-session.clock) > s.options.Lookahead {
 			return nil, false
 		}
 	}
-	session.queue = session.queue[1:]
-	return head, false
+	count := 1
+	if s.options.Coalesce {
+		runes := len([]rune(head.text))
+		for count < len(session.queue) && count < maxUnitItems && !endsClause(session.queue[count-1].text) {
+			runes += len([]rune(session.queue[count].text))
+			if runes > maxUnitRunes {
+				break
+			}
+			count++
+		}
+		open := !endsClause(session.queue[count-1].text) && count == len(session.queue) && count < maxUnitItems
+		if open && waiting && s.options.ClauseHold > 0 {
+			if !session.holding {
+				session.holding, session.holdStart = true, session.clock
+			}
+			if time.Duration(session.clock-session.holdStart) < s.options.ClauseHold {
+				return nil, false
+			}
+		}
+	}
+	session.holding = false
+	items := append([]*speechItem(nil), session.queue[:count]...)
+	session.queue = session.queue[count:]
+	unit := &speechUnit{items: items, event: items[0].event, prosody: items[len(items)-1].prosody}
+	texts := make([]string, 0, len(items))
+	for _, item := range items {
+		texts = append(texts, strings.TrimSpace(item.text))
+		unit.event.Span.Start = min(unit.event.Span.Start, item.event.Span.Start)
+		unit.event.Span.End = max(unit.event.Span.End, item.event.Span.End)
+		if item.prosody != nil {
+			unit.prosody = item.prosody
+		}
+	}
+	unit.text = strings.Join(texts, " ")
+	return unit, false
 }
 
-func (s *SpeechStage) synthesize(session *speechSession, item *speechItem) error {
+func (s *SpeechStage) timelineLocked(session *speechSession) Timeline {
+	timeline := s.options.Timeline
+	if session.gap > 0 {
+		timeline.MinGap = max(timeline.MinGap, session.gap)
+	}
+	return timeline
+}
+
+func (s *SpeechStage) gapAfter(text string) time.Duration {
+	trimmed := strings.TrimRight(strings.TrimSpace(text), "\"'»”)]")
+	if trimmed == "" {
+		return 0
+	}
+	switch {
+	case strings.ContainsRune(".?!…", lastRune(trimmed)):
+		return s.options.Gaps.Sentence
+	case strings.ContainsRune(",;:", lastRune(trimmed)):
+		return s.options.Gaps.Clause
+	default:
+		return s.options.Gaps.Continuation
+	}
+}
+
+func endsClause(text string) bool {
+	trimmed := strings.TrimRight(strings.TrimSpace(text), "\"'»”)]")
+	return trimmed != "" && strings.ContainsRune(".?!…,;:", lastRune(trimmed))
+}
+
+func lastRune(text string) rune {
+	runes := []rune(text)
+	return runes[len(runes)-1]
+}
+
+func (s *SpeechStage) synthesize(session *speechSession, item *speechUnit) error {
 	s.mu.Lock()
-	slot := s.options.Timeline.plan(session.cursor, item.event.Span)
+	slot := s.timelineLocked(session).plan(session.cursor, item.event.Span)
 	prosody := s.smoothLocked(session, item.prosody)
 	s.mu.Unlock()
 	for _, silence := range silencePCM(slot.silence, SynthesisSampleRate) {
@@ -312,19 +419,33 @@ func (s *SpeechStage) synthesize(session *speechSession, item *speechItem) error
 	var held []byte
 	first := true
 	fadeSamples := int(int64(s.options.Fade) * SynthesisSampleRate / int64(time.Second))
+	margin := int(int64(trimMargin) * SynthesisSampleRate / int64(time.Second))
 	flush := func(data []byte, last bool) error {
 		if first {
+			if s.options.TrimSilence {
+				data = trimLeading(data, margin)
+			}
 			fadeIn(data, fadeSamples)
 			first = false
 		}
 		if last {
+			if s.options.TrimSilence {
+				data = trimTrailing(data, margin)
+			}
 			fadeOut(data, fadeSamples)
+		}
+		if len(data) == 0 {
+			return nil
 		}
 		produced += len(data)
 		return s.emit(session, item.event, qol.TypeAudioPCM, data)
 	}
 	err := s.process.exchange(s.processContext, func(writer io.Writer) error {
-		return wire.WriteSynthesisRequest(writer, qol.SynthesisRequest{Text: singleLine(item.text), Language: "es", Prosody: prosody, Pace: float32(slot.pace)})
+		text := singleLine(item.text)
+		if s.options.Coalesce && !endsClause(text) {
+			text += ","
+		}
+		return wire.WriteSynthesisRequest(writer, qol.SynthesisRequest{Text: text, Language: "es", Prosody: prosody, Pace: float32(slot.pace)})
 	}, func(reader *bufio.Reader) error {
 		for {
 			chunk, err := wire.ReadSynthesisChunk(reader)
@@ -355,8 +476,9 @@ func (s *SpeechStage) synthesize(session *speechSession, item *speechItem) error
 	}
 	s.mu.Lock()
 	session.cursor = slot.start + qol.MediaTime(pcmDuration(produced, SynthesisSampleRate))
+	session.gap = s.gapAfter(item.text)
 	s.mu.Unlock()
-	slog.Info("tts scheduled utterance", "session", session.id, "sequence", item.sequence, "lag", time.Duration(slot.start-item.event.Span.Start).Round(time.Millisecond), "silence", slot.silence.Round(time.Millisecond), "pace", slot.pace, "synthesis", time.Since(started).Round(time.Millisecond))
+	slog.Info("tts scheduled utterance", "session", session.id, "sequence", item.items[0].sequence, "fragments", len(item.items), "lag", time.Duration(slot.start-item.event.Span.Start).Round(time.Millisecond), "silence", slot.silence.Round(time.Millisecond), "pace", slot.pace, "synthesis", time.Since(started).Round(time.Millisecond))
 	return nil
 }
 
@@ -455,6 +577,37 @@ func (s *SpeechStage) publishTelemetry(session *speechSession) {
 		Encoding:   qol.EncodingProtobuf,
 		Payload:    payload,
 	})
+}
+
+func trimLeading(data []byte, margin int) []byte {
+	total := len(data) / 2
+	first := 0
+	for first < total && abs16(data, first) < silenceThreshold {
+		first++
+	}
+	if first == total {
+		return data
+	}
+	return data[max(first-margin, 0)*2:]
+}
+
+func trimTrailing(data []byte, margin int) []byte {
+	last := len(data)/2 - 1
+	for last >= 0 && abs16(data, last) < silenceThreshold {
+		last--
+	}
+	if last < 0 {
+		return data
+	}
+	return data[:min(last+1+margin, len(data)/2)*2]
+}
+
+func abs16(data []byte, index int) int {
+	value := int(int16(binary.LittleEndian.Uint16(data[index*2:])))
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func fadeIn(data []byte, samples int) {
