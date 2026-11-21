@@ -13,6 +13,7 @@ func TestBuildStageWiresTheProsodyGraph(t *testing.T) {
 		"stt-whisper": qol.ChannelAudioInput,
 		"translate":   qol.ChannelASRText,
 		"tts":         qol.ChannelTranslationText,
+		"conductor":   qol.ChannelTelemetry,
 	} {
 		stage, err := buildStage(stageOptions{stageType: stageType, processor: "/bin/true", ffmpeg: "ffmpeg"})
 		if err != nil {
@@ -28,11 +29,22 @@ func TestBuildStageWiresTheProsodyGraph(t *testing.T) {
 	}
 }
 
+func TestBuildStageSelectsTheStreamingTranslator(t *testing.T) {
+	stage, err := buildStage(stageOptions{stageType: "translate", processor: "/bin/true", translator: "llm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inputs := stage.Spec().Inputs; len(inputs) != 2 || inputs[1].Channel != qol.ChannelTranslateControl {
+		t.Fatalf("the llm translator must accept control: %#v", inputs)
+	}
+}
+
 func TestBuildStageRejectsMissingConfiguration(t *testing.T) {
 	for _, options := range []stageOptions{
 		{stageType: "tts"},
 		{stageType: "record", name: "record-en"},
 		{stageType: "unknown"},
+		{stageType: "translate", processor: "/bin/true", translator: "neural"},
 	} {
 		if _, err := buildStage(options); err == nil {
 			t.Fatalf("expected %q to fail", options.stageType)

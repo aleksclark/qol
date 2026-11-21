@@ -87,6 +87,42 @@ message TranslationPayload {
   string target_language = 3;
   bool final = 4;
   ProsodyPayload prosody = 5;
+  repeated uint64 replaces = 6;
+}
+
+message ControlPayload {
+  oneof directive {
+    CondenseDirective condense = 1;
+    SummarizeDirective summarize = 2;
+    GlossaryDirective glossary = 3;
+  }
+}
+
+message CondenseDirective {
+  repeated uint64 target_sequences = 1;
+  float target_ratio = 2;
+}
+
+message SummarizeDirective {}
+
+message GlossaryDirective {
+  repeated GlossaryEntry entries = 1;
+}
+
+message GlossaryEntry {
+  string source = 1;
+  string target = 2;
+}
+
+message TelemetryPayload {
+  string stage = 1;
+  int64 consumed_through_ns = 2;
+  int64 output_cursor_ns = 3;
+  double backlog_seconds = 4;
+  repeated uint64 queued_sequences = 5;
+  double projected_lag_seconds = 6;
+  double processing_ms = 7;
+  uint32 context_turns = 8;
 }
 
 message StoredAudioPayload {

@@ -84,49 +84,68 @@ def timed_words(result) -> list[tuple[str, float]]:
 
 
 class Segmenter:
+    CONTEXT_WORDS = 6
+
     def __init__(self, frames, punctuate) -> None:
         self.frames = frames
         self.punctuate = punctuate
         self.commit_words = int(os.environ.get("QOL_STT_COMMIT_WORDS", "5"))
         self.lookahead = int(os.environ.get("QOL_STT_COMMIT_LOOKAHEAD", "2"))
+        self.max_commit_ns = seconds_ns(float(os.environ.get("QOL_STT_MAX_COMMIT_SECONDS", "3.5")))
         self.committed = 0
         self.start_ns = 0
+        self.context: list[str] = []
 
-    def format(self, words: list[str]) -> str:
-        text = " ".join(words).lower()
-        return self.punctuate(text) if self.punctuate else normalize(text)
+    def mark(self, words: list[str]) -> list[str]:
+        if not words:
+            return []
+        lowered = [word.lower() for word in words]
+        if self.punctuate is None:
+            text = normalize(" ".join(lowered))
+            if self.context and self.context[-1][-1:] not in ".?!":
+                text = text[:1].lower() + text[1:] if not text.startswith(("I ", "I'")) else text
+            return text.split()
+        context = self.context[-self.CONTEXT_WORDS :]
+        marked = self.punctuate(" ".join(context + lowered)).split()
+        if len(marked) != len(context) + len(lowered):
+            return self.punctuate(" ".join(lowered)).split()
+        return marked[len(context) :]
 
-    def emit(self, words: list[str], end_ns: int) -> None:
-        text = self.format(words).strip()
+    def emit(self, marked: list[str], end_ns: int) -> None:
+        text = " ".join(marked).strip()
+        end_ns = max(end_ns, self.start_ns)
         if text:
-            write_utterance(self.frames, self.start_ns, max(end_ns, self.start_ns), text)
-        self.start_ns = max(end_ns, self.start_ns)
+            write_utterance(self.frames, self.start_ns, end_ns, text)
+            self.context = (self.context + marked)[-self.CONTEXT_WORDS :]
+        self.start_ns = end_ns
 
     def partial(self, result) -> None:
-        if self.punctuate is None or self.commit_words <= 0:
+        if self.commit_words <= 0:
             return
         words = timed_words(result)
         pending = words[self.committed :]
-        if len(pending) < 3 + self.lookahead:
+        if len(pending) <= self.lookahead + 1:
             return
-        marked = self.punctuate(" ".join(word for word, _ in pending).lower()).split()
+        marked = self.mark([word for word, _ in pending])
         if len(marked) != len(pending):
             return
         boundary = -1
-        for index in range(len(pending) - self.lookahead - 1, -1, -1):
-            mark = marked[index][-1]
-            if (mark in ".?!" and index + 1 >= 3) or (mark in ",;:" and index + 1 >= self.commit_words):
-                boundary = index
-                break
+        if self.punctuate is not None:
+            for index in range(len(pending) - self.lookahead - 1, -1, -1):
+                mark = marked[index][-1]
+                if (mark in ".?!" and index + 1 >= 3) or (mark in ",;:" and index + 1 >= self.commit_words):
+                    boundary = index
+                    break
+        if boundary < 0 and seconds_ns(pending[-1][1]) - self.start_ns >= self.max_commit_ns:
+            boundary = len(pending) - self.lookahead - 1
         if boundary < 0:
             return
-        end_ns = seconds_ns(pending[boundary + 1][1])
-        self.emit([word for word, _ in pending[: boundary + 1]], end_ns)
+        self.emit(marked[: boundary + 1], seconds_ns(pending[boundary + 1][1]))
         self.committed += boundary + 1
 
     def endpoint(self, result, end_ns: int) -> None:
         words = [word for word, _ in timed_words(result)][self.committed :]
-        self.emit(words, end_ns)
+        self.emit(self.mark(words), end_ns)
         self.committed = 0
 
 
@@ -146,7 +165,7 @@ def main() -> None:
         enable_endpoint_detection=True,
         rule1_min_trailing_silence=1.2,
         rule2_min_trailing_silence=float(os.environ.get("QOL_STT_TRAILING_SILENCE", "0.6")),
-        rule3_min_utterance_length=float(os.environ.get("QOL_STT_MAX_UTTERANCE", "4.0")),
+        rule3_min_utterance_length=float(os.environ.get("QOL_STT_MAX_UTTERANCE", "15.0")),
     )
     segmenter = Segmenter(frames, load_punctuation())
     ffmpeg = subprocess.Popen(

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -136,10 +137,13 @@ func TestRealEnglishToSpanishAudioGraph(t *testing.T) {
 		worker.NewCapture(),
 		worker.NewSTT(worker.NewCommandProcessor(python, filepath.Join(processors, "stt_whisper.py"))),
 		worker.NewProsody(media.NewDecoder("ffmpeg"), emotionStage(emotionPython, processors), prosody.DefaultReferenceRate, 30*time.Second).AttachReferenceAudio(os.Getenv("QOL_E2E_ATTACH_REFERENCE") == "1"),
-		worker.NewTranslate(worker.NewCommandProcessor(python, filepath.Join(processors, "translate_en_es.py"))),
-		worker.NewTTS(worker.NewCommandProcessor(ttsPython, filepath.Join(processors, ttsProcessor)), timelineFromEnv(t)),
+		translatorStage(t, python, processors),
+		worker.NewTTS(worker.NewCommandProcessor(ttsPython, filepath.Join(processors, ttsProcessor)), speechFromEnv(t)),
 		worker.NewRecord("record-en", qol.ChannelRecordENInput, qol.ChannelRecordENCompleted, worker.NewFFmpegOggOpusStore("ffmpeg", outputDir)),
 		worker.NewRecord("record-es", qol.ChannelTTSAudio, qol.ChannelRecordESCompleted, worker.NewFFmpegS16LEOggOpusStore("ffmpeg", outputDir, worker.SynthesisSampleRate, 1)),
+	}
+	if os.Getenv("QOL_E2E_TRANSLATOR") == "llm" {
+		stages = append(stages, worker.NewConductor(worker.DefaultConductorOptions()))
 	}
 	bus := newMemoryBus()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -182,6 +186,25 @@ func TestRealEnglishToSpanishAudioGraph(t *testing.T) {
 		t.Fatalf("only %d of %d utterances carried prosody", report.Annotated, report.Utterances)
 	}
 	t.Logf("wall=%s %s", elapsed.Round(time.Millisecond), report.Summary())
+	continuity := evaluation.Discontinuities(spanishTrack(t, bus), worker.SynthesisSampleRate)
+	joins := evaluation.PhraseJoins(utterances, 80*time.Millisecond)
+	t.Logf("continuity: %d phrase joins, %d under 80 ms, shortest %s; %d onsets from digital silence (%.1f/min)", joins.Count, joins.Tight, joins.MinimumGap.Round(time.Millisecond), continuity.AbruptOnsets, continuity.OnsetsPerMin)
+	condensed := 0
+	for _, translation := range spanishTranslations(t, bus) {
+		if len(translation.Replaces) > 0 {
+			condensed++
+		}
+	}
+	t.Logf("controls: %d condensed renderings, %d control events", condensed, len(bus.channel(qol.ChannelTranslateControl)))
+	if maximum := os.Getenv("QOL_E2E_MAX_ONSETS_PER_MIN"); maximum != "" {
+		limit, err := strconv.ParseFloat(maximum, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if continuity.OnsetsPerMin > limit {
+			t.Fatalf("%.1f hard onsets per minute exceeds %.1f", continuity.OnsetsPerMin, limit)
+		}
+	}
 	if dump := os.Getenv("QOL_E2E_DUMP_SYNTHESIS"); dump != "" {
 		writeSynthesisFixture(t, dump, utterances)
 	}
@@ -270,6 +293,49 @@ func writeSynthesisFixture(t *testing.T, path string, utterances []evaluation.Ut
 	t.Logf("synthesis fixture: %s (%d requests)", path, len(utterances))
 }
 
+func translatorStage(t *testing.T, python, processors string) qol.Stage {
+	t.Helper()
+	if os.Getenv("QOL_E2E_TRANSLATOR") == "llm" {
+		return worker.NewStreamingTranslate(worker.NewCommandProcessor(envOr("QOL_E2E_TRANSLATE_PYTHON", python), filepath.Join(processors, "translate_llm.py")))
+	}
+	return worker.NewTranslate(worker.NewCommandProcessor(python, filepath.Join(processors, "translate_en_es.py")))
+}
+
+func speechFromEnv(t *testing.T) worker.SpeechOptions {
+	t.Helper()
+	options := worker.DefaultSpeechOptions()
+	options.Timeline = timelineFromEnv(t)
+	return options
+}
+
+func spanishTrack(t *testing.T, bus *memoryBus) []int16 {
+	t.Helper()
+	events := bus.channel(qol.ChannelTTSAudio)
+	slices.SortFunc(events, func(left, right qol.Event) int { return int(left.Seq) - int(right.Seq) })
+	var samples []int16
+	for _, event := range events {
+		audio, err := wire.UnmarshalAudio(event.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		samples = append(samples, evaluation.Samples(audio.Data)...)
+	}
+	return samples
+}
+
+func spanishTranslations(t *testing.T, bus *memoryBus) []qol.Translation {
+	t.Helper()
+	var result []qol.Translation
+	for _, event := range bus.channel(qol.ChannelTranslationText) {
+		translation, err := wire.UnmarshalTranslation(event.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result = append(result, translation)
+	}
+	return result
+}
+
 func timelineFromEnv(t *testing.T) worker.Timeline {
 	t.Helper()
 	timeline := worker.DefaultTimeline()
@@ -279,6 +345,13 @@ func timelineFromEnv(t *testing.T) worker.Timeline {
 			t.Fatal(err)
 		}
 		timeline.Delay = delay
+	}
+	if value := os.Getenv("QOL_E2E_MIN_GAP"); value != "" {
+		gap, err := time.ParseDuration(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		timeline.MinGap = gap
 	}
 	if value := os.Getenv("QOL_E2E_MAX_PACE"); value != "" {
 		pace, err := strconv.ParseFloat(value, 64)
@@ -356,6 +429,20 @@ func publishSample(t *testing.T, ctx context.Context, bus qol.Publisher, path st
 	}
 	defer file.Close()
 	buffer := make([]byte, 256*1024)
+	var pace time.Duration
+	if os.Getenv("QOL_E2E_REALTIME") == "1" {
+		info, err := file.Stat()
+		if err != nil {
+			t.Fatal(err)
+		}
+		seconds, err := strconv.ParseFloat(envOr("QOL_E2E_SECONDS", "90"), 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		buffer = make([]byte, 16*1024)
+		pace = time.Duration(float64(len(buffer)) / float64(info.Size()) * seconds * float64(time.Second))
+	}
+	started := time.Now()
 	var sequence uint64
 	for {
 		size, readErr := io.ReadFull(file, buffer)
@@ -374,6 +461,9 @@ func publishSample(t *testing.T, ctx context.Context, bus qol.Publisher, path st
 		sequence++
 		if end {
 			return
+		}
+		if pace > 0 {
+			time.Sleep(time.Until(started.Add(time.Duration(sequence) * pace)))
 		}
 	}
 }

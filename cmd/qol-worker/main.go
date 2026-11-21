@@ -31,7 +31,7 @@ func newCommand() *cobra.Command {
 	command.PersistentFlags().String("nats-user", "", "NATS user")
 	command.PersistentFlags().String("nats-password", "", "NATS password; prefer QOL_NATS_PASSWORD")
 	runCommand := &cobra.Command{Use: "run", Short: "Run one streaming graph stage", RunE: run}
-	runCommand.Flags().String("type", "", "Stage type: capture, stt-whisper, prosody, translate, tts, or record")
+	runCommand.Flags().String("type", "", "Stage type: capture, stt-whisper, prosody, translate, tts, conductor, or record")
 	runCommand.Flags().String("stage", "", "Deprecated alias for --type")
 	runCommand.Flags().String("name", "", "Stage instance name; defaults to the type")
 	runCommand.Flags().String("input", "", "Input channel override")
@@ -44,6 +44,15 @@ func newCommand() *cobra.Command {
 	runCommand.Flags().Duration("playout-delay", worker.DefaultPlayoutDelay, "TTS output starts this long after the source utterance ends")
 	runCommand.Flags().Float64("max-pace", worker.DefaultMaxPace, "Largest TTS speed-up used to catch up when output falls behind")
 	runCommand.Flags().Duration("catch-up-window", worker.DefaultCatchUpWindow, "Backlog that triggers the largest TTS speed-up")
+	runCommand.Flags().Duration("min-gap", worker.DefaultMinGap, "Shortest pause TTS leaves between phrases")
+	runCommand.Flags().Bool("just-in-time", true, "TTS: hold translated text until shortly before its slot so it can still be condensed")
+	runCommand.Flags().Duration("synthesis-lookahead", worker.DefaultSynthesisLookahead, "TTS: synthesize a phrase once its slot is this close to the source clock")
+	runCommand.Flags().Duration("fade", worker.DefaultFade, "TTS: fade in and out at phrase edges")
+	runCommand.Flags().Float64("prosody-smoothing", worker.DefaultProsodySmoothing, "TTS: weight of the newest delivery measurement (1 disables smoothing)")
+	runCommand.Flags().String("translator", "line", "Translate: line (one sentence per line) or llm (streaming context-aware translator)")
+	runCommand.Flags().Duration("condense-lag", worker.DefaultCondenseLag, "Conductor: projected lag that triggers condensing the unspoken backlog")
+	runCommand.Flags().Float64("condense-ratio", worker.DefaultCondenseRatio, "Conductor: target length of condensed speech relative to a full rendering")
+	runCommand.Flags().Uint32("summarize-turns", worker.DefaultSummarizeTurns, "Conductor: translator context turns that trigger summarizing")
 	runCommand.Flags().String("output-dir", "/output", "Ogg/Opus output directory")
 	runCommand.Flags().String("ffmpeg", "ffmpeg", "ffmpeg executable")
 	command.AddCommand(runCommand)
@@ -80,10 +89,24 @@ func run(command *cobra.Command, _ []string) error {
 		referenceRate:  settings.GetFloat64("reference-rate"),
 		prosodyTimeout: settings.GetDuration("prosody-timeout"),
 		attachAudio:    settings.GetBool("attach-reference-audio"),
-		timeline: worker.Timeline{
-			Delay:         settings.GetDuration("playout-delay"),
-			MaxPace:       settings.GetFloat64("max-pace"),
-			CatchUpWindow: settings.GetDuration("catch-up-window"),
+		speech: worker.SpeechOptions{
+			Timeline: worker.Timeline{
+				Delay:         settings.GetDuration("playout-delay"),
+				MaxPace:       settings.GetFloat64("max-pace"),
+				CatchUpWindow: settings.GetDuration("catch-up-window"),
+				MinGap:        settings.GetDuration("min-gap"),
+			},
+			JustInTime: settings.GetBool("just-in-time"),
+			ClockStage: "prosody",
+			Lookahead:  settings.GetDuration("synthesis-lookahead"),
+			Fade:       settings.GetDuration("fade"),
+			Smoothing:  settings.GetFloat64("prosody-smoothing"),
+		},
+		translator: settings.GetString("translator"),
+		conductor: worker.ConductorOptions{
+			CondenseLag:    settings.GetDuration("condense-lag"),
+			CondenseRatio:  float32(settings.GetFloat64("condense-ratio")),
+			SummarizeTurns: settings.GetUint32("summarize-turns"),
 		},
 	})
 	if err != nil {
@@ -107,7 +130,9 @@ type stageOptions struct {
 	referenceRate  float64
 	prosodyTimeout time.Duration
 	attachAudio    bool
-	timeline       worker.Timeline
+	speech         worker.SpeechOptions
+	translator     string
+	conductor      worker.ConductorOptions
 }
 
 func buildStage(options stageOptions) (qol.Stage, error) {
@@ -118,6 +143,8 @@ func buildStage(options stageOptions) (qol.Stage, error) {
 	switch options.stageType {
 	case "capture":
 		return worker.NewCapture(), nil
+	case "conductor":
+		return worker.NewConductor(options.conductor), nil
 	case "prosody":
 		var emotion worker.LiveProcessor
 		if options.processor != "" {
@@ -133,9 +160,16 @@ func buildStage(options stageOptions) (qol.Stage, error) {
 		case "stt-whisper":
 			return worker.NewSTT(processor), nil
 		case "translate":
-			return worker.NewTranslate(processor), nil
+			switch options.translator {
+			case "", "line":
+				return worker.NewTranslate(processor), nil
+			case "llm":
+				return worker.NewStreamingTranslate(processor), nil
+			default:
+				return nil, fmt.Errorf("translator must be line or llm, got %q", options.translator)
+			}
 		default:
-			return worker.NewTTS(processor, options.timeline), nil
+			return worker.NewTTS(processor, options.speech), nil
 		}
 	case "record":
 		if options.input == "" || options.output == "" {
@@ -147,6 +181,6 @@ func buildStage(options stageOptions) (qol.Stage, error) {
 		}
 		return worker.NewRecord(name, options.input, options.output, store), nil
 	default:
-		return nil, errors.New("stage type must be capture, stt-whisper, prosody, translate, tts, or record")
+		return nil, errors.New("stage type must be capture, stt-whisper, prosody, translate, tts, conductor, or record")
 	}
 }

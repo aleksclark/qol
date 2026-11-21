@@ -83,6 +83,65 @@ type Translation struct {
 	Final bool
 
 	Prosody *Prosody
+
+	Replaces []uint64
+}
+
+type ControlKind uint8
+
+const (
+	ControlCondense ControlKind = iota + 1
+	ControlSummarize
+	ControlGlossary
+)
+
+type GlossaryEntry struct {
+	Source string
+	Target string
+}
+
+type Control struct {
+	Kind            ControlKind
+	TargetSequences []uint64
+	TargetRatio     float32
+	Glossary        []GlossaryEntry
+}
+
+type Telemetry struct {
+	Stage               string
+	ConsumedThrough     MediaTime
+	OutputCursor        MediaTime
+	BacklogSeconds      float64
+	QueuedSequences     []uint64
+	ProjectedLagSeconds float64
+	ProcessingMillis    float64
+	ContextTurns        uint32
+}
+
+type TranslatorRequestKind uint8
+
+const (
+	TranslatorTurn TranslatorRequestKind = iota + 1
+	TranslatorCondense
+	TranslatorSummarize
+	TranslatorGlossary
+	TranslatorEnd
+)
+
+type TranslatorRequest struct {
+	SessionID   string
+	Kind        TranslatorRequestKind
+	TurnID      uint64
+	Text        string
+	Final       bool
+	TurnIDs     []uint64
+	TargetRatio float32
+	Glossary    []GlossaryEntry
+}
+
+type TranslatorResponse struct {
+	Text         string
+	ContextTurns uint32
 }
 
 type StoredAudio struct {

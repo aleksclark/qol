@@ -63,8 +63,17 @@ Graph subjects are fixed:
 9. `qol.graph.record-es.input`: Spanish S16LE PCM chunks.
 10. `qol.graph.record-en.completed`: English Ogg/Opus metadata.
 11. `qol.graph.record-es.completed`: Spanish Ogg/Opus metadata.
+12. `qol.graph.translate.control`: `ControlPayload` directives for the streaming translator (condense, summarize, glossary).
+13. `qol.graph.telemetry`: `TelemetryPayload` from prosody (source clock), translate (context, latency), and TTS (queue, cursor, projected lag).
 
-Capture publishes each incoming audio-stream event onto its four output ports. STT, prosody, and `record-en` subscribe to their own input subjects. Prosody joins each STT utterance with the decoded source PCM covering its span, optionally asks an emotion classifier (`--processor` on the prosody worker), and forwards; translate and TTS keep the utterance span and prosody on every output. TTS schedules each utterance on the source timeline: it starts no earlier than `span.End + --playout-delay`, inserts silence when ahead, and raises `SynthesisRequest.pace` up to `--max-pace` while behind, so `record-es` is time-aligned with `record-en`.
+Capture publishes each incoming audio-stream event onto its four output ports. STT, prosody, and `record-en` subscribe to their own input subjects. Prosody joins each STT utterance with the decoded source PCM covering its span, optionally asks an emotion classifier (`--processor` on the prosody worker), and forwards; translate and TTS keep the utterance span and prosody on every output. TTS schedules each utterance on the source timeline: it starts no earlier than `span.End + --playout-delay`, leaves at least `--min-gap` between phrases, inserts silence when ahead, and raises `SynthesisRequest.pace` up to `--max-pace` while behind, so `record-es` is time-aligned with `record-en`.
+
+Streaming control loop (see `docs/streaming-architecture.md`):
+- STT commits only whole words: clause boundaries from the online punctuation model, or everything but the last `QOL_STT_COMMIT_LOOKAHEAD` words once a phrase reaches `QOL_STT_MAX_COMMIT_SECONDS`. The recognizer's own hard cut (`QOL_STT_MAX_UTTERANCE`) is only a 15 s safety net.
+- `--translator=llm` runs `translate_llm.py`, a context-keeping LLM translator. It answers each committed English fragment with the Spanish that continues its previous output, may hold a fragment (empty reply) until more arrives, and accepts condense, summarize, and glossary requests. `--translator=line` keeps the context-free opus-mt fallback.
+- With `--just-in-time` (default), TTS holds translated phrases until their slot is within `--synthesis-lookahead` of the prosody clock. Held phrases stay revisable: a translation with `replaces` swaps them out, and it is dropped if any of them already started.
+- The `conductor` stage reads telemetry and sends controls. It condenses the queued backlog beyond the next two phrases when projected lag exceeds `--condense-lag`, and asks for a context summary when the translator holds `--summarize-turns` turns.
+- TTS smooths delivery between phrases (`--prosody-smoothing`) and fades phrase edges (`--fade`).
 
 Every externally visible worker implements `qol.Stage` through `Spec()` and `Run(ctx, bus)`. Stage ports declare channels and accepted/produced semantic event types. Processors are long-lived subprocesses started once per stream (STT) or once per worker (translate, TTS) so models load once.
 

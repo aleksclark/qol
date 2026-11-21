@@ -129,7 +129,7 @@ func MarshalTranslation(value qol.Translation) ([]byte, error) {
 	if err := ValidateProsody(value.Prosody); err != nil {
 		return nil, err
 	}
-	return proto.Marshal(&qolv1.TranslationPayload{Text: value.Text, SourceLanguage: value.SourceLanguage, TargetLanguage: value.TargetLanguage, Final: value.Final, Prosody: ProsodyToProto(value.Prosody)})
+	return proto.Marshal(&qolv1.TranslationPayload{Text: value.Text, SourceLanguage: value.SourceLanguage, TargetLanguage: value.TargetLanguage, Final: value.Final, Prosody: ProsodyToProto(value.Prosody), Replaces: append([]uint64(nil), value.Replaces...)})
 }
 
 func UnmarshalTranslation(payload []byte) (qol.Translation, error) {
@@ -137,7 +137,7 @@ func UnmarshalTranslation(payload []byte) (qol.Translation, error) {
 	if err := proto.Unmarshal(payload, message); err != nil {
 		return qol.Translation{}, err
 	}
-	value := qol.Translation{Text: message.Text, SourceLanguage: message.SourceLanguage, TargetLanguage: message.TargetLanguage, Final: message.Final, Prosody: ProsodyFromProto(message.Prosody)}
+	value := qol.Translation{Text: message.Text, SourceLanguage: message.SourceLanguage, TargetLanguage: message.TargetLanguage, Final: message.Final, Prosody: ProsodyFromProto(message.Prosody), Replaces: append([]uint64(nil), message.Replaces...)}
 	if value.Text == "" || value.SourceLanguage == "" || value.TargetLanguage == "" {
 		return qol.Translation{}, errors.New("translation text and languages are required")
 	}

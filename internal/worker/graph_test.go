@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -25,6 +26,13 @@ type memoryBus struct {
 	events   map[string][]qol.Event
 	handlers map[string][]qol.Handler
 	errors   []error
+	async    bool
+}
+
+func newAsyncBus() *memoryBus {
+	bus := newMemoryBus()
+	bus.async = true
+	return bus
 }
 
 func newMemoryBus() *memoryBus {
@@ -47,11 +55,54 @@ func (b *memoryBus) Publish(ctx context.Context, event qol.Event) error {
 	return nil
 }
 
-func (b *memoryBus) Subscribe(_ context.Context, channel string, _ qol.SubscribeOptions, handler qol.Handler) (qol.Subscription, error) {
+func (b *memoryBus) Subscribe(ctx context.Context, channel string, _ qol.SubscribeOptions, handler qol.Handler) (qol.Subscription, error) {
+	if b.async {
+		handler = b.queued(ctx, handler)
+	}
 	b.mu.Lock()
 	b.handlers[channel] = append(b.handlers[channel], handler)
 	b.mu.Unlock()
 	return &memorySubscription{done: make(chan struct{})}, nil
+}
+
+func (b *memoryBus) queued(ctx context.Context, handler qol.Handler) qol.Handler {
+	var mu sync.Mutex
+	var pending []qol.Event
+	ready := make(chan struct{}, 1)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ready:
+			}
+			for {
+				mu.Lock()
+				if len(pending) == 0 {
+					mu.Unlock()
+					break
+				}
+				event := pending[0]
+				pending = pending[1:]
+				mu.Unlock()
+				if err := handler(ctx, event); err != nil {
+					b.mu.Lock()
+					b.errors = append(b.errors, err)
+					b.mu.Unlock()
+				}
+			}
+		}
+	}()
+	return func(_ context.Context, event qol.Event) error {
+		mu.Lock()
+		pending = append(pending, event)
+		mu.Unlock()
+		select {
+		case ready <- struct{}{}:
+		default:
+		}
+		return nil
+	}
 }
 
 func (b *memoryBus) channel(name string) []qol.Event {
@@ -265,7 +316,7 @@ func TestStagesCarryProsodyThroughTheGraph(t *testing.T) {
 	capture := worker.NewCapture()
 	prosodyStage := worker.NewProsody(passthroughDecoder(), nil, 4, time.Second)
 	translate := worker.NewTranslate(lineTranslator(func(string) string { return "hola" }))
-	tts := worker.NewTTS(synth, worker.Timeline{})
+	tts := worker.NewTTS(synth, worker.SpeechOptions{})
 	english := &store{directory: t.TempDir()}
 	spanish := &store{directory: t.TempDir()}
 	recordEN := worker.NewRecord("record-en", qol.ChannelRecordENInput, qol.ChannelRecordENCompleted, english)
@@ -396,6 +447,9 @@ func TestProsodyMeasuresPausesAndForwardsWithoutAudio(t *testing.T) {
 	if excited.Prosody.Arousal <= baseline.Prosody.Arousal {
 		t.Fatalf("louder, higher speech must raise arousal: %.2f <= %.2f", excited.Prosody.Arousal, baseline.Prosody.Arousal)
 	}
+	if clock := lastTelemetry(t, bus, "prosody"); clock.ConsumedThrough != seconds(4) {
+		t.Fatalf("prosody must publish the decoded source clock: %+v", clock)
+	}
 	end, err := wire.UnmarshalText(forwarded[3].Payload)
 	if err != nil || !end.Final || end.Prosody != nil || forwarded[3].Seq != 3 {
 		t.Fatalf("end marker must pass through: %#v %v", end, err)
@@ -447,41 +501,252 @@ func TestTranslateRestartsAFailedProcessor(t *testing.T) {
 	}
 }
 
-func TestTTSUsesOneProcessAndRejectsWrongFormats(t *testing.T) {
-	synth := &synthesizer{}
-	bus := newMemoryBus()
-	runStages(t, bus, worker.NewTTS(synth, worker.Timeline{}))
-	for sequence, text := range []string{"uno", "dos"} {
-		payload, err := wire.MarshalTranslation(qol.Translation{Text: text, SourceLanguage: "en", TargetLanguage: "es"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := bus.Publish(context.Background(), qol.Event{ID: text, SessionID: "session", Channel: qol.ChannelTranslationText, Type: qol.TypeTranslationFinal, Seq: uint64(sequence), ProducedAt: time.Now(), Encoding: qol.EncodingProtobuf, Payload: payload}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if synth.starts != 1 || len(synth.requests) != 2 || synth.requests[0].Pace != 1 || synth.requests[1].Pace != 1 {
-		t.Fatalf("TTS must reuse one processor: starts=%d requests=%d", synth.starts, len(synth.requests))
-	}
-	if events := bus.channel(qol.ChannelTTSAudio); len(events) != 4 {
-		t.Fatalf("expected streamed chunks for both utterances, got %d", len(events))
-	}
-
-	wrong := liveFunc(func(input io.Reader, output io.Writer) error {
-		if _, err := wire.ReadSynthesisRequest(bufio.NewReader(input)); err != nil {
-			return err
-		}
-		return wire.WriteSynthesisChunk(output, qol.SynthesisChunk{Audio: qol.Audio{Format: qol.PCMFormat{SampleRate: 24000, Channels: 1, Format: qol.SampleS16LE}, Data: []byte{1, 2}}, EndOfUtterance: true})
-	})
-	other := newMemoryBus()
-	runStages(t, other, worker.NewTTS(wrong, worker.Timeline{}))
-	payload, err := wire.MarshalTranslation(qol.Translation{Text: "tres", SourceLanguage: "en", TargetLanguage: "es"})
+func publishTranslation(t *testing.T, bus *memoryBus, sequence uint64, span qol.Span, translation qol.Translation) {
+	t.Helper()
+	translation.SourceLanguage, translation.TargetLanguage = "en", "es"
+	payload, err := wire.MarshalTranslation(translation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := other.Publish(context.Background(), qol.Event{ID: "tres", SessionID: "session", Channel: qol.ChannelTranslationText, Type: qol.TypeTranslationFinal, Seq: 0, ProducedAt: time.Now(), Encoding: qol.EncodingProtobuf, Payload: payload}); err == nil {
-		t.Fatal("expected a 24 kHz synthesizer to be rejected")
+	if err := bus.Publish(context.Background(), qol.Event{ID: fmt.Sprintf("es-%d", sequence), SessionID: "session", Channel: qol.ChannelTranslationText, Type: qol.TypeTranslationFinal, Seq: sequence, Span: span, ProducedAt: time.Now(), Encoding: qol.EncodingProtobuf, Payload: payload}); err != nil {
+		t.Fatal(err)
 	}
+}
+
+func (s *synthesizer) snapshot() (int, []qol.SynthesisRequest) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.starts, append([]qol.SynthesisRequest(nil), s.requests...)
+}
+
+func TestTTSUsesOneProcessAndSkipsWrongFormats(t *testing.T) {
+	synth := &synthesizer{}
+	bus := newMemoryBus()
+	runStages(t, bus, worker.NewTTS(synth, worker.SpeechOptions{}))
+	publishTranslation(t, bus, 0, qol.Span{}, qol.Translation{Text: "uno"})
+	publishTranslation(t, bus, 1, qol.Span{}, qol.Translation{Text: "dos"})
+	bus.waitFor(t, qol.ChannelTTSAudio, 4)
+	starts, requests := synth.snapshot()
+	if starts != 1 || len(requests) != 2 || requests[0].Pace != 1 || requests[1].Pace != 1 {
+		t.Fatalf("TTS must reuse one processor: starts=%d requests=%d", starts, len(requests))
+	}
+
+	wrong := liveFunc(func(input io.Reader, output io.Writer) error {
+		reader := bufio.NewReader(input)
+		for {
+			if _, err := wire.ReadSynthesisRequest(reader); err != nil {
+				return nil
+			}
+			if err := wire.WriteSynthesisChunk(output, qol.SynthesisChunk{Audio: qol.Audio{Format: qol.PCMFormat{SampleRate: 24000, Channels: 1, Format: qol.SampleS16LE}, Data: []byte{1, 2}}, EndOfUtterance: true}); err != nil {
+				return err
+			}
+		}
+	})
+	other := newMemoryBus()
+	runStages(t, other, worker.NewTTS(wrong, worker.SpeechOptions{}))
+	publishTranslation(t, other, 0, qol.Span{}, qol.Translation{Text: "tres"})
+	publishTranslation(t, other, 1, qol.Span{}, qol.Translation{Text: " ", Final: true})
+	events := other.waitFor(t, qol.ChannelTTSAudio, 1)
+	if len(events) != 1 || events[0].Type != qol.TypeAudioPCMFinal {
+		t.Fatalf("a 24 kHz synthesizer must not reach the recording: %#v", events)
+	}
+}
+
+func TestTTSSchedulesUtterancesOnTheSourceTimeline(t *testing.T) {
+	var mu sync.Mutex
+	var paces []float32
+	threeSeconds := liveFunc(func(input io.Reader, output io.Writer) error {
+		reader := bufio.NewReader(input)
+		for {
+			request, err := wire.ReadSynthesisRequest(reader)
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			paces = append(paces, request.Pace)
+			mu.Unlock()
+			pcm := make([]byte, 3*2*worker.SynthesisSampleRate)
+			for offset := 0; offset < len(pcm); offset += 64 * 1024 {
+				end := min(offset+64*1024, len(pcm))
+				if err := wire.WriteSynthesisChunk(output, qol.SynthesisChunk{Audio: qol.Audio{Format: speechFormat, Data: pcm[offset:end]}, EndOfUtterance: end == len(pcm)}); err != nil {
+					return err
+				}
+			}
+		}
+	})
+	bus := newMemoryBus()
+	runStages(t, bus, worker.NewTTS(threeSeconds, worker.SpeechOptions{Timeline: worker.Timeline{Delay: time.Second, MaxPace: 1.5, CatchUpWindow: 2 * time.Second}}))
+	spans := []qol.Span{{Start: 0, End: seconds(2)}, {Start: seconds(2), End: seconds(4)}, {Start: seconds(10), End: seconds(12)}}
+	for sequence, span := range spans {
+		publishTranslation(t, bus, uint64(sequence), span, qol.Translation{Text: "hola"})
+	}
+	publishTranslation(t, bus, 3, qol.Span{Start: seconds(12), End: seconds(12)}, qol.Translation{Text: " ", Final: true})
+	waitForFinal(t, bus)
+	mu.Lock()
+	got := append([]float32(nil), paces...)
+	mu.Unlock()
+	if !slices.Equal(got, []float32{1, 1.25, 1}) {
+		t.Fatalf("pace must rise only while output is behind: %v", got)
+	}
+	bytesBySpan := map[qol.Span]int{}
+	for _, event := range bus.channel(qol.ChannelTTSAudio) {
+		audio, err := wire.UnmarshalAudio(event.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bytesBySpan[event.Span] += len(audio.Data)
+	}
+	perSecond := 2 * worker.SynthesisSampleRate
+	for index, want := range []int{(3 + 3) * perSecond, 3 * perSecond, (4 + 3) * perSecond} {
+		if got := bytesBySpan[spans[index]]; got != want {
+			t.Fatalf("utterance %d: %d bytes of silence plus speech, want %d", index, got, want)
+		}
+	}
+}
+
+func TestTTSHoldsSpeechUntilDueAndAppliesReplacements(t *testing.T) {
+	synth := &synthesizer{}
+	bus := newMemoryBus()
+	options := worker.DefaultSpeechOptions()
+	options.Timeline = worker.Timeline{Delay: time.Second}
+	runStages(t, bus, worker.NewTTS(synth, options))
+	clock := func(at qol.MediaTime, sequence uint64) {
+		payload, err := wire.MarshalTelemetry(qol.Telemetry{Stage: "prosody", ConsumedThrough: at})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := bus.Publish(context.Background(), qol.Event{ID: fmt.Sprintf("clock-%d", sequence), SessionID: "session", Channel: qol.ChannelTelemetry, Type: qol.TypeTelemetry, Seq: sequence, Span: qol.Span{Start: at, End: at}, ProducedAt: time.Now(), Encoding: qol.EncodingProtobuf, Payload: payload}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clock(0, 0)
+	publishTranslation(t, bus, 0, qol.Span{Start: seconds(10), End: seconds(12)}, qol.Translation{Text: "primero"})
+	publishTranslation(t, bus, 1, qol.Span{Start: seconds(12), End: seconds(14)}, qol.Translation{Text: "segundo"})
+	publishTranslation(t, bus, 2, qol.Span{Start: seconds(14), End: seconds(16)}, qol.Translation{Text: "tercero"})
+	time.Sleep(50 * time.Millisecond)
+	if _, requests := synth.snapshot(); len(requests) != 0 {
+		t.Fatalf("speech due at 13 s must wait for the clock, got %v", requests)
+	}
+	telemetry := lastTelemetry(t, bus, "tts")
+	if !slices.Equal(telemetry.QueuedSequences, []uint64{0, 1, 2}) || telemetry.BacklogSeconds <= 0 || telemetry.ProjectedLagSeconds < 2 {
+		t.Fatalf("TTS must report its revisable backlog: %+v", telemetry)
+	}
+	publishTranslation(t, bus, 3, qol.Span{Start: seconds(12), End: seconds(16)}, qol.Translation{Text: "resumen", Replaces: []uint64{1, 2}})
+	publishTranslation(t, bus, 4, qol.Span{Start: seconds(16), End: seconds(16)}, qol.Translation{Text: "tarde", Replaces: []uint64{0, 9}})
+	clock(seconds(11.5), 1)
+	waitForRequests(t, synth, 1)
+	publishTranslation(t, bus, 5, qol.Span{Start: seconds(16), End: seconds(16)}, qol.Translation{Text: " ", Final: true})
+	waitForFinal(t, bus)
+	_, requests := synth.snapshot()
+	var texts []string
+	for _, request := range requests {
+		texts = append(texts, request.Text)
+	}
+	if !slices.Equal(texts, []string{"primero", "resumen"}) {
+		t.Fatalf("queued speech must be replaced and stale replacements dropped: %v", texts)
+	}
+}
+
+func TestTTSFadesAndSmoothsDelivery(t *testing.T) {
+	var mu sync.Mutex
+	var rates []float32
+	loud := liveFunc(func(input io.Reader, output io.Writer) error {
+		reader := bufio.NewReader(input)
+		for {
+			request, err := wire.ReadSynthesisRequest(reader)
+			if err != nil {
+				return nil
+			}
+			mu.Lock()
+			rates = append(rates, request.Prosody.RelativeRate)
+			mu.Unlock()
+			pcm := make([]byte, 2*2205)
+			for index := 0; index < len(pcm); index += 2 {
+				binary.LittleEndian.PutUint16(pcm[index:], uint16(int16(10000)))
+			}
+			if err := wire.WriteSynthesisChunk(output, qol.SynthesisChunk{Audio: qol.Audio{Format: speechFormat, Data: pcm}, EndOfUtterance: true}); err != nil {
+				return err
+			}
+		}
+	})
+	bus := newMemoryBus()
+	runStages(t, bus, worker.NewTTS(loud, worker.SpeechOptions{Fade: 10 * time.Millisecond, Smoothing: 0.5}))
+	publishTranslation(t, bus, 0, qol.Span{}, qol.Translation{Text: "uno", Prosody: &qol.Prosody{RelativeRate: 1}})
+	publishTranslation(t, bus, 1, qol.Span{}, qol.Translation{Text: "dos", Prosody: &qol.Prosody{RelativeRate: 2}})
+	publishTranslation(t, bus, 2, qol.Span{}, qol.Translation{Text: " ", Final: true})
+	waitForFinal(t, bus)
+	mu.Lock()
+	got := append([]float32(nil), rates...)
+	mu.Unlock()
+	if !slices.Equal(got, []float32{1, 1.5}) {
+		t.Fatalf("delivery changes must be smoothed: %v", got)
+	}
+	audio, err := wire.UnmarshalAudio(bus.channel(qol.ChannelTTSAudio)[0].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	samples := len(audio.Data) / 2
+	first := int16(binary.LittleEndian.Uint16(audio.Data))
+	middle := int16(binary.LittleEndian.Uint16(audio.Data[(samples/2)*2:]))
+	last := int16(binary.LittleEndian.Uint16(audio.Data[len(audio.Data)-2:]))
+	if first != 0 || middle != 10000 || last > 500 {
+		t.Fatalf("speech must fade in and out: first=%d middle=%d last=%d", first, middle, last)
+	}
+}
+
+var speechFormat = qol.PCMFormat{SampleRate: worker.SynthesisSampleRate, Channels: 1, Format: qol.SampleS16LE}
+
+func seconds(value float64) qol.MediaTime {
+	return qol.MediaTime(value * float64(time.Second))
+}
+
+func waitForFinal(t *testing.T, bus *memoryBus) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		for _, event := range bus.channel(qol.ChannelTTSAudio) {
+			if event.Type == qol.TypeAudioPCMFinal {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("TTS did not finish the stream")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func waitForRequests(t *testing.T, synth *synthesizer, count int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, requests := synth.snapshot(); len(requests) >= count {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected %d synthesis requests", count)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func lastTelemetry(t *testing.T, bus *memoryBus, stage string) qol.Telemetry {
+	t.Helper()
+	events := bus.channel(qol.ChannelTelemetry)
+	for index := len(events) - 1; index >= 0; index-- {
+		telemetry, err := wire.UnmarshalTelemetry(events[index].Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if telemetry.Stage == stage {
+			return telemetry
+		}
+	}
+	t.Fatalf("no %s telemetry", stage)
+	return qol.Telemetry{}
 }
 
 func assertSpec(t *testing.T, spec qol.StageSpec, name, input, output string) {
@@ -548,63 +813,5 @@ func TestProsodyForwardsWhenTheClassifierFails(t *testing.T) {
 	text, err := wire.UnmarshalText(bus.waitFor(t, qol.ChannelASRText, 1)[0].Payload)
 	if err != nil || text.Prosody == nil || text.Prosody.Emotion != "" || text.Prosody.PitchHz == 0 {
 		t.Fatalf("prosody must survive a classifier failure without inventing emotion: %#v %v", text.Prosody, err)
-	}
-}
-
-func TestTTSSchedulesUtterancesOnTheSourceTimeline(t *testing.T) {
-	var mu sync.Mutex
-	var paces []float32
-	threeSeconds := liveFunc(func(input io.Reader, output io.Writer) error {
-		reader := bufio.NewReader(input)
-		format := qol.PCMFormat{SampleRate: worker.SynthesisSampleRate, Channels: 1, Format: qol.SampleS16LE}
-		for {
-			request, err := wire.ReadSynthesisRequest(reader)
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			mu.Lock()
-			paces = append(paces, request.Pace)
-			mu.Unlock()
-			pcm := make([]byte, 3*2*worker.SynthesisSampleRate)
-			for offset := 0; offset < len(pcm); offset += 64 * 1024 {
-				end := min(offset+64*1024, len(pcm))
-				if err := wire.WriteSynthesisChunk(output, qol.SynthesisChunk{Audio: qol.Audio{Format: format, Data: pcm[offset:end]}, EndOfUtterance: end == len(pcm)}); err != nil {
-					return err
-				}
-			}
-		}
-	})
-	bus := newMemoryBus()
-	runStages(t, bus, worker.NewTTS(threeSeconds, worker.Timeline{Delay: time.Second, MaxPace: 1.5, CatchUpWindow: 2 * time.Second}))
-	seconds := func(value float64) qol.MediaTime { return qol.MediaTime(value * float64(time.Second)) }
-	spans := []qol.Span{{Start: 0, End: seconds(2)}, {Start: seconds(2), End: seconds(4)}, {Start: seconds(10), End: seconds(12)}}
-	for sequence, span := range spans {
-		payload, err := wire.MarshalTranslation(qol.Translation{Text: "hola", SourceLanguage: "en", TargetLanguage: "es"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := bus.Publish(context.Background(), qol.Event{ID: "es", SessionID: "session", Channel: qol.ChannelTranslationText, Type: qol.TypeTranslationFinal, Seq: uint64(sequence), Span: span, ProducedAt: time.Now(), Encoding: qol.EncodingProtobuf, Payload: payload}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if !slices.Equal(paces, []float32{1, 1.25, 1}) {
-		t.Fatalf("pace must rise only while output is behind: %v", paces)
-	}
-	bytesBySpan := map[qol.Span]int{}
-	for _, event := range bus.channel(qol.ChannelTTSAudio) {
-		audio, err := wire.UnmarshalAudio(event.Payload)
-		if err != nil {
-			t.Fatal(err)
-		}
-		bytesBySpan[event.Span] += len(audio.Data)
-	}
-	perSecond := 2 * worker.SynthesisSampleRate
-	for index, want := range []int{(3 + 3) * perSecond, 3 * perSecond, (4 + 3) * perSecond} {
-		if got := bytesBySpan[spans[index]]; got != want {
-			t.Fatalf("utterance %d: %d bytes of silence plus speech, want %d", index, got, want)
-		}
 	}
 }

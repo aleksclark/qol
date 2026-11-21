@@ -261,6 +261,424 @@ func (x *EmotionResult) GetScores() []*EmotionScore {
 	return nil
 }
 
+type TranslatorRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// Types that are valid to be assigned to Request:
+	//
+	//	*TranslatorRequest_Turn
+	//	*TranslatorRequest_Condense
+	//	*TranslatorRequest_Summarize
+	//	*TranslatorRequest_Glossary
+	//	*TranslatorRequest_End
+	Request       isTranslatorRequest_Request `protobuf_oneof:"request"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TranslatorRequest) Reset() {
+	*x = TranslatorRequest{}
+	mi := &file_qol_v1_processor_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TranslatorRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TranslatorRequest) ProtoMessage() {}
+
+func (x *TranslatorRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_qol_v1_processor_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TranslatorRequest.ProtoReflect.Descriptor instead.
+func (*TranslatorRequest) Descriptor() ([]byte, []int) {
+	return file_qol_v1_processor_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *TranslatorRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *TranslatorRequest) GetRequest() isTranslatorRequest_Request {
+	if x != nil {
+		return x.Request
+	}
+	return nil
+}
+
+func (x *TranslatorRequest) GetTurn() *TranslateTurn {
+	if x != nil {
+		if x, ok := x.Request.(*TranslatorRequest_Turn); ok {
+			return x.Turn
+		}
+	}
+	return nil
+}
+
+func (x *TranslatorRequest) GetCondense() *CondenseTurns {
+	if x != nil {
+		if x, ok := x.Request.(*TranslatorRequest_Condense); ok {
+			return x.Condense
+		}
+	}
+	return nil
+}
+
+func (x *TranslatorRequest) GetSummarize() *SummarizeContext {
+	if x != nil {
+		if x, ok := x.Request.(*TranslatorRequest_Summarize); ok {
+			return x.Summarize
+		}
+	}
+	return nil
+}
+
+func (x *TranslatorRequest) GetGlossary() *GlossaryUpdate {
+	if x != nil {
+		if x, ok := x.Request.(*TranslatorRequest_Glossary); ok {
+			return x.Glossary
+		}
+	}
+	return nil
+}
+
+func (x *TranslatorRequest) GetEnd() *EndSession {
+	if x != nil {
+		if x, ok := x.Request.(*TranslatorRequest_End); ok {
+			return x.End
+		}
+	}
+	return nil
+}
+
+type isTranslatorRequest_Request interface {
+	isTranslatorRequest_Request()
+}
+
+type TranslatorRequest_Turn struct {
+	Turn *TranslateTurn `protobuf:"bytes,2,opt,name=turn,proto3,oneof"`
+}
+
+type TranslatorRequest_Condense struct {
+	Condense *CondenseTurns `protobuf:"bytes,3,opt,name=condense,proto3,oneof"`
+}
+
+type TranslatorRequest_Summarize struct {
+	Summarize *SummarizeContext `protobuf:"bytes,4,opt,name=summarize,proto3,oneof"`
+}
+
+type TranslatorRequest_Glossary struct {
+	Glossary *GlossaryUpdate `protobuf:"bytes,5,opt,name=glossary,proto3,oneof"`
+}
+
+type TranslatorRequest_End struct {
+	End *EndSession `protobuf:"bytes,6,opt,name=end,proto3,oneof"`
+}
+
+func (*TranslatorRequest_Turn) isTranslatorRequest_Request() {}
+
+func (*TranslatorRequest_Condense) isTranslatorRequest_Request() {}
+
+func (*TranslatorRequest_Summarize) isTranslatorRequest_Request() {}
+
+func (*TranslatorRequest_Glossary) isTranslatorRequest_Request() {}
+
+func (*TranslatorRequest_End) isTranslatorRequest_Request() {}
+
+type TranslateTurn struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TurnId        uint64                 `protobuf:"varint,1,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
+	Text          string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	Final         bool                   `protobuf:"varint,3,opt,name=final,proto3" json:"final,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TranslateTurn) Reset() {
+	*x = TranslateTurn{}
+	mi := &file_qol_v1_processor_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TranslateTurn) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TranslateTurn) ProtoMessage() {}
+
+func (x *TranslateTurn) ProtoReflect() protoreflect.Message {
+	mi := &file_qol_v1_processor_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TranslateTurn.ProtoReflect.Descriptor instead.
+func (*TranslateTurn) Descriptor() ([]byte, []int) {
+	return file_qol_v1_processor_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *TranslateTurn) GetTurnId() uint64 {
+	if x != nil {
+		return x.TurnId
+	}
+	return 0
+}
+
+func (x *TranslateTurn) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *TranslateTurn) GetFinal() bool {
+	if x != nil {
+		return x.Final
+	}
+	return false
+}
+
+type CondenseTurns struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TurnIds       []uint64               `protobuf:"varint,1,rep,packed,name=turn_ids,json=turnIds,proto3" json:"turn_ids,omitempty"`
+	TargetRatio   float32                `protobuf:"fixed32,2,opt,name=target_ratio,json=targetRatio,proto3" json:"target_ratio,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CondenseTurns) Reset() {
+	*x = CondenseTurns{}
+	mi := &file_qol_v1_processor_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CondenseTurns) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CondenseTurns) ProtoMessage() {}
+
+func (x *CondenseTurns) ProtoReflect() protoreflect.Message {
+	mi := &file_qol_v1_processor_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CondenseTurns.ProtoReflect.Descriptor instead.
+func (*CondenseTurns) Descriptor() ([]byte, []int) {
+	return file_qol_v1_processor_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *CondenseTurns) GetTurnIds() []uint64 {
+	if x != nil {
+		return x.TurnIds
+	}
+	return nil
+}
+
+func (x *CondenseTurns) GetTargetRatio() float32 {
+	if x != nil {
+		return x.TargetRatio
+	}
+	return 0
+}
+
+type SummarizeContext struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SummarizeContext) Reset() {
+	*x = SummarizeContext{}
+	mi := &file_qol_v1_processor_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SummarizeContext) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SummarizeContext) ProtoMessage() {}
+
+func (x *SummarizeContext) ProtoReflect() protoreflect.Message {
+	mi := &file_qol_v1_processor_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SummarizeContext.ProtoReflect.Descriptor instead.
+func (*SummarizeContext) Descriptor() ([]byte, []int) {
+	return file_qol_v1_processor_proto_rawDescGZIP(), []int{7}
+}
+
+type GlossaryUpdate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Entries       []*GlossaryEntry       `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GlossaryUpdate) Reset() {
+	*x = GlossaryUpdate{}
+	mi := &file_qol_v1_processor_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GlossaryUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GlossaryUpdate) ProtoMessage() {}
+
+func (x *GlossaryUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_qol_v1_processor_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GlossaryUpdate.ProtoReflect.Descriptor instead.
+func (*GlossaryUpdate) Descriptor() ([]byte, []int) {
+	return file_qol_v1_processor_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GlossaryUpdate) GetEntries() []*GlossaryEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+type EndSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EndSession) Reset() {
+	*x = EndSession{}
+	mi := &file_qol_v1_processor_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EndSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EndSession) ProtoMessage() {}
+
+func (x *EndSession) ProtoReflect() protoreflect.Message {
+	mi := &file_qol_v1_processor_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EndSession.ProtoReflect.Descriptor instead.
+func (*EndSession) Descriptor() ([]byte, []int) {
+	return file_qol_v1_processor_proto_rawDescGZIP(), []int{9}
+}
+
+type TranslatorResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	ContextTurns  uint32                 `protobuf:"varint,2,opt,name=context_turns,json=contextTurns,proto3" json:"context_turns,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TranslatorResponse) Reset() {
+	*x = TranslatorResponse{}
+	mi := &file_qol_v1_processor_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TranslatorResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TranslatorResponse) ProtoMessage() {}
+
+func (x *TranslatorResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_qol_v1_processor_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TranslatorResponse.ProtoReflect.Descriptor instead.
+func (*TranslatorResponse) Descriptor() ([]byte, []int) {
+	return file_qol_v1_processor_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *TranslatorResponse) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *TranslatorResponse) GetContextTurns() uint32 {
+	if x != nil {
+		return x.ContextTurns
+	}
+	return 0
+}
+
 var File_qol_v1_processor_proto protoreflect.FileDescriptor
 
 var file_qol_v1_processor_proto_rawDesc = string([]byte{
@@ -295,11 +713,52 @@ var file_qol_v1_processor_proto_rawDesc = string([]byte{
 	0x02, 0x20, 0x01, 0x28, 0x02, 0x52, 0x0a, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x64, 0x65, 0x6e, 0x63,
 	0x65, 0x12, 0x2c, 0x0a, 0x06, 0x73, 0x63, 0x6f, 0x72, 0x65, 0x73, 0x18, 0x03, 0x20, 0x03, 0x28,
 	0x0b, 0x32, 0x14, 0x2e, 0x71, 0x6f, 0x6c, 0x2e, 0x76, 0x31, 0x2e, 0x45, 0x6d, 0x6f, 0x74, 0x69,
-	0x6f, 0x6e, 0x53, 0x63, 0x6f, 0x72, 0x65, 0x52, 0x06, 0x73, 0x63, 0x6f, 0x72, 0x65, 0x73, 0x42,
-	0x2c, 0x5a, 0x2a, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x61, 0x6c,
-	0x65, 0x6b, 0x73, 0x63, 0x6c, 0x61, 0x72, 0x6b, 0x2f, 0x71, 0x6f, 0x6c, 0x2f, 0x67, 0x65, 0x6e,
-	0x2f, 0x71, 0x6f, 0x6c, 0x2f, 0x76, 0x31, 0x3b, 0x71, 0x6f, 0x6c, 0x76, 0x31, 0x62, 0x06, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x6f, 0x6e, 0x53, 0x63, 0x6f, 0x72, 0x65, 0x52, 0x06, 0x73, 0x63, 0x6f, 0x72, 0x65, 0x73, 0x22,
+	0xb7, 0x02, 0x0a, 0x11, 0x54, 0x72, 0x61, 0x6e, 0x73, 0x6c, 0x61, 0x74, 0x6f, 0x72, 0x52, 0x65,
+	0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x1d, 0x0a, 0x0a, 0x73, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e,
+	0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x73, 0x65, 0x73, 0x73, 0x69,
+	0x6f, 0x6e, 0x49, 0x64, 0x12, 0x2b, 0x0a, 0x04, 0x74, 0x75, 0x72, 0x6e, 0x18, 0x02, 0x20, 0x01,
+	0x28, 0x0b, 0x32, 0x15, 0x2e, 0x71, 0x6f, 0x6c, 0x2e, 0x76, 0x31, 0x2e, 0x54, 0x72, 0x61, 0x6e,
+	0x73, 0x6c, 0x61, 0x74, 0x65, 0x54, 0x75, 0x72, 0x6e, 0x48, 0x00, 0x52, 0x04, 0x74, 0x75, 0x72,
+	0x6e, 0x12, 0x33, 0x0a, 0x08, 0x63, 0x6f, 0x6e, 0x64, 0x65, 0x6e, 0x73, 0x65, 0x18, 0x03, 0x20,
+	0x01, 0x28, 0x0b, 0x32, 0x15, 0x2e, 0x71, 0x6f, 0x6c, 0x2e, 0x76, 0x31, 0x2e, 0x43, 0x6f, 0x6e,
+	0x64, 0x65, 0x6e, 0x73, 0x65, 0x54, 0x75, 0x72, 0x6e, 0x73, 0x48, 0x00, 0x52, 0x08, 0x63, 0x6f,
+	0x6e, 0x64, 0x65, 0x6e, 0x73, 0x65, 0x12, 0x38, 0x0a, 0x09, 0x73, 0x75, 0x6d, 0x6d, 0x61, 0x72,
+	0x69, 0x7a, 0x65, 0x18, 0x04, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x18, 0x2e, 0x71, 0x6f, 0x6c, 0x2e,
+	0x76, 0x31, 0x2e, 0x53, 0x75, 0x6d, 0x6d, 0x61, 0x72, 0x69, 0x7a, 0x65, 0x43, 0x6f, 0x6e, 0x74,
+	0x65, 0x78, 0x74, 0x48, 0x00, 0x52, 0x09, 0x73, 0x75, 0x6d, 0x6d, 0x61, 0x72, 0x69, 0x7a, 0x65,
+	0x12, 0x34, 0x0a, 0x08, 0x67, 0x6c, 0x6f, 0x73, 0x73, 0x61, 0x72, 0x79, 0x18, 0x05, 0x20, 0x01,
+	0x28, 0x0b, 0x32, 0x16, 0x2e, 0x71, 0x6f, 0x6c, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x6c, 0x6f, 0x73,
+	0x73, 0x61, 0x72, 0x79, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x48, 0x00, 0x52, 0x08, 0x67, 0x6c,
+	0x6f, 0x73, 0x73, 0x61, 0x72, 0x79, 0x12, 0x26, 0x0a, 0x03, 0x65, 0x6e, 0x64, 0x18, 0x06, 0x20,
+	0x01, 0x28, 0x0b, 0x32, 0x12, 0x2e, 0x71, 0x6f, 0x6c, 0x2e, 0x76, 0x31, 0x2e, 0x45, 0x6e, 0x64,
+	0x53, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x48, 0x00, 0x52, 0x03, 0x65, 0x6e, 0x64, 0x42, 0x09,
+	0x0a, 0x07, 0x72, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0x52, 0x0a, 0x0d, 0x54, 0x72, 0x61,
+	0x6e, 0x73, 0x6c, 0x61, 0x74, 0x65, 0x54, 0x75, 0x72, 0x6e, 0x12, 0x17, 0x0a, 0x07, 0x74, 0x75,
+	0x72, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x06, 0x74, 0x75, 0x72,
+	0x6e, 0x49, 0x64, 0x12, 0x12, 0x0a, 0x04, 0x74, 0x65, 0x78, 0x74, 0x18, 0x02, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x04, 0x74, 0x65, 0x78, 0x74, 0x12, 0x14, 0x0a, 0x05, 0x66, 0x69, 0x6e, 0x61, 0x6c,
+	0x18, 0x03, 0x20, 0x01, 0x28, 0x08, 0x52, 0x05, 0x66, 0x69, 0x6e, 0x61, 0x6c, 0x22, 0x4d, 0x0a,
+	0x0d, 0x43, 0x6f, 0x6e, 0x64, 0x65, 0x6e, 0x73, 0x65, 0x54, 0x75, 0x72, 0x6e, 0x73, 0x12, 0x19,
+	0x0a, 0x08, 0x74, 0x75, 0x72, 0x6e, 0x5f, 0x69, 0x64, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x04,
+	0x52, 0x07, 0x74, 0x75, 0x72, 0x6e, 0x49, 0x64, 0x73, 0x12, 0x21, 0x0a, 0x0c, 0x74, 0x61, 0x72,
+	0x67, 0x65, 0x74, 0x5f, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x18, 0x02, 0x20, 0x01, 0x28, 0x02, 0x52,
+	0x0b, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x52, 0x61, 0x74, 0x69, 0x6f, 0x22, 0x12, 0x0a, 0x10,
+	0x53, 0x75, 0x6d, 0x6d, 0x61, 0x72, 0x69, 0x7a, 0x65, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74,
+	0x22, 0x41, 0x0a, 0x0e, 0x47, 0x6c, 0x6f, 0x73, 0x73, 0x61, 0x72, 0x79, 0x55, 0x70, 0x64, 0x61,
+	0x74, 0x65, 0x12, 0x2f, 0x0a, 0x07, 0x65, 0x6e, 0x74, 0x72, 0x69, 0x65, 0x73, 0x18, 0x01, 0x20,
+	0x03, 0x28, 0x0b, 0x32, 0x15, 0x2e, 0x71, 0x6f, 0x6c, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x6c, 0x6f,
+	0x73, 0x73, 0x61, 0x72, 0x79, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x52, 0x07, 0x65, 0x6e, 0x74, 0x72,
+	0x69, 0x65, 0x73, 0x22, 0x0c, 0x0a, 0x0a, 0x45, 0x6e, 0x64, 0x53, 0x65, 0x73, 0x73, 0x69, 0x6f,
+	0x6e, 0x22, 0x4d, 0x0a, 0x12, 0x54, 0x72, 0x61, 0x6e, 0x73, 0x6c, 0x61, 0x74, 0x6f, 0x72, 0x52,
+	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x12, 0x0a, 0x04, 0x74, 0x65, 0x78, 0x74, 0x18,
+	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x74, 0x65, 0x78, 0x74, 0x12, 0x23, 0x0a, 0x0d, 0x63,
+	0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x5f, 0x74, 0x75, 0x72, 0x6e, 0x73, 0x18, 0x02, 0x20, 0x01,
+	0x28, 0x0d, 0x52, 0x0c, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x54, 0x75, 0x72, 0x6e, 0x73,
+	0x42, 0x2c, 0x5a, 0x2a, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x61,
+	0x6c, 0x65, 0x6b, 0x73, 0x63, 0x6c, 0x61, 0x72, 0x6b, 0x2f, 0x71, 0x6f, 0x6c, 0x2f, 0x67, 0x65,
+	0x6e, 0x2f, 0x71, 0x6f, 0x6c, 0x2f, 0x76, 0x31, 0x3b, 0x71, 0x6f, 0x6c, 0x76, 0x31, 0x62, 0x06,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 })
 
 var (
@@ -314,27 +773,41 @@ func file_qol_v1_processor_proto_rawDescGZIP() []byte {
 	return file_qol_v1_processor_proto_rawDescData
 }
 
-var file_qol_v1_processor_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_qol_v1_processor_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_qol_v1_processor_proto_goTypes = []any{
 	(*RecognizedUtterance)(nil), // 0: qol.v1.RecognizedUtterance
 	(*SynthesisRequest)(nil),    // 1: qol.v1.SynthesisRequest
 	(*SynthesisChunk)(nil),      // 2: qol.v1.SynthesisChunk
 	(*EmotionResult)(nil),       // 3: qol.v1.EmotionResult
-	(*MediaSpan)(nil),           // 4: qol.v1.MediaSpan
-	(*ProsodyPayload)(nil),      // 5: qol.v1.ProsodyPayload
-	(*PcmFormat)(nil),           // 6: qol.v1.PcmFormat
-	(*EmotionScore)(nil),        // 7: qol.v1.EmotionScore
+	(*TranslatorRequest)(nil),   // 4: qol.v1.TranslatorRequest
+	(*TranslateTurn)(nil),       // 5: qol.v1.TranslateTurn
+	(*CondenseTurns)(nil),       // 6: qol.v1.CondenseTurns
+	(*SummarizeContext)(nil),    // 7: qol.v1.SummarizeContext
+	(*GlossaryUpdate)(nil),      // 8: qol.v1.GlossaryUpdate
+	(*EndSession)(nil),          // 9: qol.v1.EndSession
+	(*TranslatorResponse)(nil),  // 10: qol.v1.TranslatorResponse
+	(*MediaSpan)(nil),           // 11: qol.v1.MediaSpan
+	(*ProsodyPayload)(nil),      // 12: qol.v1.ProsodyPayload
+	(*PcmFormat)(nil),           // 13: qol.v1.PcmFormat
+	(*EmotionScore)(nil),        // 14: qol.v1.EmotionScore
+	(*GlossaryEntry)(nil),       // 15: qol.v1.GlossaryEntry
 }
 var file_qol_v1_processor_proto_depIdxs = []int32{
-	4, // 0: qol.v1.RecognizedUtterance.span:type_name -> qol.v1.MediaSpan
-	5, // 1: qol.v1.SynthesisRequest.prosody:type_name -> qol.v1.ProsodyPayload
-	6, // 2: qol.v1.SynthesisChunk.format:type_name -> qol.v1.PcmFormat
-	7, // 3: qol.v1.EmotionResult.scores:type_name -> qol.v1.EmotionScore
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	11, // 0: qol.v1.RecognizedUtterance.span:type_name -> qol.v1.MediaSpan
+	12, // 1: qol.v1.SynthesisRequest.prosody:type_name -> qol.v1.ProsodyPayload
+	13, // 2: qol.v1.SynthesisChunk.format:type_name -> qol.v1.PcmFormat
+	14, // 3: qol.v1.EmotionResult.scores:type_name -> qol.v1.EmotionScore
+	5,  // 4: qol.v1.TranslatorRequest.turn:type_name -> qol.v1.TranslateTurn
+	6,  // 5: qol.v1.TranslatorRequest.condense:type_name -> qol.v1.CondenseTurns
+	7,  // 6: qol.v1.TranslatorRequest.summarize:type_name -> qol.v1.SummarizeContext
+	8,  // 7: qol.v1.TranslatorRequest.glossary:type_name -> qol.v1.GlossaryUpdate
+	9,  // 8: qol.v1.TranslatorRequest.end:type_name -> qol.v1.EndSession
+	15, // 9: qol.v1.GlossaryUpdate.entries:type_name -> qol.v1.GlossaryEntry
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_qol_v1_processor_proto_init() }
@@ -343,13 +816,20 @@ func file_qol_v1_processor_proto_init() {
 		return
 	}
 	file_qol_v1_qol_proto_init()
+	file_qol_v1_processor_proto_msgTypes[4].OneofWrappers = []any{
+		(*TranslatorRequest_Turn)(nil),
+		(*TranslatorRequest_Condense)(nil),
+		(*TranslatorRequest_Summarize)(nil),
+		(*TranslatorRequest_Glossary)(nil),
+		(*TranslatorRequest_End)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_qol_v1_processor_proto_rawDesc), len(file_qol_v1_processor_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
