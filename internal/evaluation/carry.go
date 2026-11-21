@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	qol "github.com/aleksclark/qol"
@@ -105,7 +106,7 @@ func CarryThrough(utterances []Utterance, classify Classifier) (Report, error) {
 }
 
 func FromGraphEvents(translations, audio []qol.Event) ([]Utterance, error) {
-	bySpan := map[qol.Span]int{}
+	byID := map[string]int{}
 	var utterances []Utterance
 	for _, event := range translations {
 		translation, err := wire.UnmarshalTranslation(event.Payload)
@@ -115,32 +116,91 @@ func FromGraphEvents(translations, audio []qol.Event) ([]Utterance, error) {
 		if translation.Final {
 			continue
 		}
-		bySpan[event.Span] = len(utterances)
+		byID[event.ID] = len(utterances)
 		utterances = append(utterances, Utterance{Span: event.Span, Text: translation.Text, Language: translation.TargetLanguage, Source: translation.Prosody, Start: -1})
 	}
 	ordered := append([]qol.Event(nil), audio...)
 	slices.SortFunc(ordered, func(left, right qol.Event) int { return int(left.Seq) - int(right.Seq) })
 	var position int
+	spoken := map[int]bool{}
 	for _, event := range ordered {
 		decoded, err := wire.UnmarshalAudio(event.Payload)
 		if err != nil {
 			return nil, err
 		}
 		if event.Type == qol.TypeAudioPCM {
-			index, ok := bySpan[event.Span]
+			if len(event.Parents) == 0 {
+				return nil, fmt.Errorf("audio event %s has no source translation", event.ID)
+			}
+			index, ok := byID[event.Parents[0]]
 			if !ok {
-				return nil, fmt.Errorf("audio for unknown span %+v", event.Span)
+				return nil, fmt.Errorf("audio for unknown translation %s", event.Parents[0])
 			}
 			target := &utterances[index]
+			target.Span = event.Span
 			target.SampleRate = decoded.Format.SampleRate
 			if target.Start < 0 {
 				target.Start = time.Duration(position) * time.Second / time.Duration(decoded.Format.SampleRate)
 			}
 			target.Samples = append(target.Samples, Samples(decoded.Data)...)
+			spoken[index] = true
 		}
 		position += len(decoded.Data) / 2
 	}
-	return utterances, nil
+	merged := make([]Utterance, 0, len(utterances))
+	weights := make([]int, 0, len(utterances))
+	for index, utterance := range utterances {
+		if !spoken[index] && len(merged) > 0 {
+			owner := &merged[len(merged)-1]
+			if len(owner.Samples) > 0 && utterance.Span.Start >= owner.Span.Start && utterance.Span.End <= owner.Span.End {
+				owner.Text = strings.TrimSpace(owner.Text + " " + utterance.Text)
+				owner.Source = averageProsody(owner.Source, weights[len(weights)-1], utterance.Source)
+				weights[len(weights)-1]++
+				continue
+			}
+		}
+		merged = append(merged, utterance)
+		weights = append(weights, 1)
+	}
+	return merged, nil
+}
+
+func averageProsody(current *qol.Prosody, count int, next *qol.Prosody) *qol.Prosody {
+	if current == nil || next == nil {
+		if current == nil {
+			return next
+		}
+		return current
+	}
+	blended := *current
+	mix := func(left, right float32) float32 { return (left*float32(count) + right) / float32(count+1) }
+	blended.Rate = mix(current.Rate, next.Rate)
+	blended.RelativeRate = mix(current.RelativeRate, next.RelativeRate)
+	blended.RelativeEnergyDB = mix(current.RelativeEnergyDB, next.RelativeEnergyDB)
+	blended.RelativePitchSemitones = mix(current.RelativePitchSemitones, next.RelativePitchSemitones)
+	blended.RelativePitchRangeSemitones = mix(current.RelativePitchRangeSemitones, next.RelativePitchRangeSemitones)
+	blended.Arousal = mix(current.Arousal, next.Arousal)
+	return &blended
+}
+
+func OpenEndings(utterances []Utterance) int {
+	open := 0
+	var spoken []Utterance
+	for _, utterance := range utterances {
+		if len(utterance.Samples) > 0 {
+			spoken = append(spoken, utterance)
+		}
+	}
+	for index, utterance := range spoken {
+		if index == len(spoken)-1 {
+			break
+		}
+		text := strings.TrimRight(strings.TrimSpace(utterance.Text), "\"'»”)]")
+		if text == "" || !strings.ContainsAny(text[len(text)-1:], ".?!,;:") && !strings.HasSuffix(text, "…") {
+			open++
+		}
+	}
+	return open
 }
 
 func Samples(data []byte) []int16 {

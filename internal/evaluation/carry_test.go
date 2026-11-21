@@ -97,8 +97,8 @@ func TestFromGraphEventsTracksOutputPosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events := []qol.Event{{Seq: 1, Type: qol.TypeAudioPCM, Span: span, Payload: silence}, {Seq: 0, Type: qol.TypeAudioPCM, Span: span, Payload: silence}}
-	utterances, err := evaluation.FromGraphEvents([]qol.Event{{Span: span, Payload: translation}}, events)
+	events := []qol.Event{{Seq: 1, Type: qol.TypeAudioPCM, Span: span, Parents: []string{"es-0"}, Payload: silence}, {Seq: 0, Type: qol.TypeAudioPCM, Span: span, Parents: []string{"es-0"}, Payload: silence}}
+	utterances, err := evaluation.FromGraphEvents([]qol.Event{{ID: "es-0", Span: span, Payload: translation}}, events)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,5 +134,43 @@ func TestPhraseJoinsMeasureSilenceBetweenPhrases(t *testing.T) {
 	joins := evaluation.PhraseJoins([]evaluation.Utterance{phrase(0, 20*time.Millisecond), phrase(10*time.Millisecond, 0), {SampleRate: rate}, phrase(300*time.Millisecond, 0)}, 80*time.Millisecond)
 	if joins.Count != 2 || joins.Tight != 1 || joins.MinimumGap < 25*time.Millisecond || joins.MinimumGap > 35*time.Millisecond {
 		t.Fatalf("unexpected joins: %+v", joins)
+	}
+}
+
+func TestFromGraphEventsMergesCoalescedFragments(t *testing.T) {
+	first, err := wire.MarshalTranslation(qol.Translation{Text: "uno dos", SourceLanguage: "en", TargetLanguage: "es"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := wire.MarshalTranslation(qol.Translation{Text: "tres.", SourceLanguage: "en", TargetLanguage: "es"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := wire.MarshalTranslation(qol.Translation{Text: "cuatro", SourceLanguage: "en", TargetLanguage: "es"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pcm, err := wire.MarshalAudio(qol.Audio{Format: qol.PCMFormat{SampleRate: 1000, Channels: 1, Format: qol.SampleS16LE}, Data: []byte{0, 1, 0, 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	translations := []qol.Event{
+		{ID: "a", Span: qol.Span{Start: 0, End: 1}, Payload: first},
+		{ID: "b", Span: qol.Span{Start: 1, End: 2}, Payload: second},
+		{ID: "c", Span: qol.Span{Start: 2, End: 3}, Payload: third},
+	}
+	audio := []qol.Event{
+		{Seq: 0, Type: qol.TypeAudioPCM, Span: qol.Span{Start: 0, End: 2}, Parents: []string{"a"}, Payload: pcm},
+		{Seq: 1, Type: qol.TypeAudioPCM, Span: qol.Span{Start: 2, End: 3}, Parents: []string{"c"}, Payload: pcm},
+	}
+	utterances, err := evaluation.FromGraphEvents(translations, audio)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(utterances) != 2 || utterances[0].Text != "uno dos tres." || utterances[1].Text != "cuatro" {
+		t.Fatalf("coalesced fragments must merge into the spoken phrase: %+v", utterances)
+	}
+	if open := evaluation.OpenEndings(utterances); open != 0 {
+		t.Fatalf("the phrase ends a sentence, so nothing was left open: %d", open)
 	}
 }

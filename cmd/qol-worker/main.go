@@ -49,6 +49,12 @@ func newCommand() *cobra.Command {
 	runCommand.Flags().Duration("synthesis-lookahead", worker.DefaultSynthesisLookahead, "TTS: synthesize a phrase once its slot is this close to the source clock")
 	runCommand.Flags().Duration("fade", worker.DefaultFade, "TTS: fade in and out at phrase edges")
 	runCommand.Flags().Float64("prosody-smoothing", worker.DefaultProsodySmoothing, "TTS: weight of the newest delivery measurement (1 disables smoothing)")
+	runCommand.Flags().Bool("coalesce", true, "TTS: speak consecutive fragments of one clause as a single phrase")
+	runCommand.Flags().Duration("clause-hold", worker.DefaultClauseHold, "TTS: longest wait, on the source clock, for the rest of an unfinished clause")
+	runCommand.Flags().Duration("sentence-gap", worker.DefaultSentenceGap, "TTS: pause after a sentence")
+	runCommand.Flags().Duration("clause-gap", worker.DefaultClauseGap, "TTS: pause after a comma, colon, or semicolon")
+	runCommand.Flags().Duration("continuation-gap", worker.DefaultContinuationGap, "TTS: pause between pieces of an unfinished clause")
+	runCommand.Flags().Bool("trim-silence", true, "TTS: trim the synthesizer's own leading and trailing silence")
 	runCommand.Flags().String("translator", "line", "Translate: line (one sentence per line) or llm (streaming context-aware translator)")
 	runCommand.Flags().Duration("condense-lag", worker.DefaultCondenseLag, "Conductor: projected lag that triggers condensing the unspoken backlog")
 	runCommand.Flags().Float64("condense-ratio", worker.DefaultCondenseRatio, "Conductor: target length of condensed speech relative to a full rendering")
@@ -96,11 +102,19 @@ func run(command *cobra.Command, _ []string) error {
 				CatchUpWindow: settings.GetDuration("catch-up-window"),
 				MinGap:        settings.GetDuration("min-gap"),
 			},
-			JustInTime: settings.GetBool("just-in-time"),
-			ClockStage: "prosody",
-			Lookahead:  settings.GetDuration("synthesis-lookahead"),
-			Fade:       settings.GetDuration("fade"),
-			Smoothing:  settings.GetFloat64("prosody-smoothing"),
+			JustInTime:  settings.GetBool("just-in-time"),
+			ClockStage:  "prosody",
+			Lookahead:   settings.GetDuration("synthesis-lookahead"),
+			Fade:        settings.GetDuration("fade"),
+			Smoothing:   settings.GetFloat64("prosody-smoothing"),
+			Coalesce:    settings.GetBool("coalesce"),
+			ClauseHold:  settings.GetDuration("clause-hold"),
+			TrimSilence: settings.GetBool("trim-silence"),
+			Gaps: worker.PhraseGaps{
+				Sentence:     settings.GetDuration("sentence-gap"),
+				Clause:       settings.GetDuration("clause-gap"),
+				Continuation: settings.GetDuration("continuation-gap"),
+			},
 		},
 		translator: settings.GetString("translator"),
 		conductor: worker.ConductorOptions{
