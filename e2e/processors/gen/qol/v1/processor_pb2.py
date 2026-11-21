@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from qol.v1 import qol_pb2 as qol_dot_v1_dot_qol__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16qol/v1/processor.proto\x12\x06qol.v1\x1a\x10qol/v1/qol.proto\"P\n\x13RecognizedUtterance\x12%\n\x04span\x18\x01 \x01(\x0b\x32\x11.qol.v1.MediaSpanR\x04span\x12\x12\n\x04text\x18\x02 \x01(\tR\x04text\"\x88\x01\n\x10SynthesisRequest\x12\x12\n\x04text\x18\x01 \x01(\tR\x04text\x12\x1a\n\x08language\x18\x02 \x01(\tR\x08language\x12\x30\n\x07prosody\x18\x03 \x01(\x0b\x32\x16.qol.v1.ProsodyPayloadR\x07prosody\x12\x12\n\x04pace\x18\x04 \x01(\x02R\x04pace\"y\n\x0eSynthesisChunk\x12)\n\x06\x66ormat\x18\x01 \x01(\x0b\x32\x11.qol.v1.PcmFormatR\x06\x66ormat\x12\x12\n\x04\x64\x61ta\x18\x02 \x01(\x0cR\x04\x64\x61ta\x12(\n\x10\x65nd_of_utterance\x18\x03 \x01(\x08R\x0e\x65ndOfUtterance\"s\n\rEmotionResult\x12\x14\n\x05label\x18\x01 \x01(\tR\x05label\x12\x1e\n\nconfidence\x18\x02 \x01(\x02R\nconfidence\x12,\n\x06scores\x18\x03 \x03(\x0b\x32\x14.qol.v1.EmotionScoreR\x06scoresB,Z*github.com/aleksclark/qol/gen/qol/v1;qolv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16qol/v1/processor.proto\x12\x06qol.v1\x1a\x10qol/v1/qol.proto\"P\n\x13RecognizedUtterance\x12%\n\x04span\x18\x01 \x01(\x0b\x32\x11.qol.v1.MediaSpanR\x04span\x12\x12\n\x04text\x18\x02 \x01(\tR\x04text\"\x88\x01\n\x10SynthesisRequest\x12\x12\n\x04text\x18\x01 \x01(\tR\x04text\x12\x1a\n\x08language\x18\x02 \x01(\tR\x08language\x12\x30\n\x07prosody\x18\x03 \x01(\x0b\x32\x16.qol.v1.ProsodyPayloadR\x07prosody\x12\x12\n\x04pace\x18\x04 \x01(\x02R\x04pace\"y\n\x0eSynthesisChunk\x12)\n\x06\x66ormat\x18\x01 \x01(\x0b\x32\x11.qol.v1.PcmFormatR\x06\x66ormat\x12\x12\n\x04\x64\x61ta\x18\x02 \x01(\x0cR\x04\x64\x61ta\x12(\n\x10\x65nd_of_utterance\x18\x03 \x01(\x08R\x0e\x65ndOfUtterance\"s\n\rEmotionResult\x12\x14\n\x05label\x18\x01 \x01(\tR\x05label\x12\x1e\n\nconfidence\x18\x02 \x01(\x02R\nconfidence\x12,\n\x06scores\x18\x03 \x03(\x0b\x32\x14.qol.v1.EmotionScoreR\x06scores\"\xb7\x02\n\x11TranslatorRequest\x12\x1d\n\nsession_id\x18\x01 \x01(\tR\tsessionId\x12+\n\x04turn\x18\x02 \x01(\x0b\x32\x15.qol.v1.TranslateTurnH\x00R\x04turn\x12\x33\n\x08\x63ondense\x18\x03 \x01(\x0b\x32\x15.qol.v1.CondenseTurnsH\x00R\x08\x63ondense\x12\x38\n\tsummarize\x18\x04 \x01(\x0b\x32\x18.qol.v1.SummarizeContextH\x00R\tsummarize\x12\x34\n\x08glossary\x18\x05 \x01(\x0b\x32\x16.qol.v1.GlossaryUpdateH\x00R\x08glossary\x12&\n\x03\x65nd\x18\x06 \x01(\x0b\x32\x12.qol.v1.EndSessionH\x00R\x03\x65ndB\t\n\x07request\"R\n\rTranslateTurn\x12\x17\n\x07turn_id\x18\x01 \x01(\x04R\x06turnId\x12\x12\n\x04text\x18\x02 \x01(\tR\x04text\x12\x14\n\x05\x66inal\x18\x03 \x01(\x08R\x05\x66inal\"M\n\rCondenseTurns\x12\x19\n\x08turn_ids\x18\x01 \x03(\x04R\x07turnIds\x12!\n\x0ctarget_ratio\x18\x02 \x01(\x02R\x0btargetRatio\"\x12\n\x10SummarizeContext\"A\n\x0eGlossaryUpdate\x12/\n\x07\x65ntries\x18\x01 \x03(\x0b\x32\x15.qol.v1.GlossaryEntryR\x07\x65ntries\"\x0c\n\nEndSession\"M\n\x12TranslatorResponse\x12\x12\n\x04text\x18\x01 \x01(\tR\x04text\x12#\n\rcontext_turns\x18\x02 \x01(\rR\x0c\x63ontextTurnsB,Z*github.com/aleksclark/qol/gen/qol/v1;qolv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -41,4 +41,18 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SYNTHESISCHUNK']._serialized_end=394
   _globals['_EMOTIONRESULT']._serialized_start=396
   _globals['_EMOTIONRESULT']._serialized_end=511
+  _globals['_TRANSLATORREQUEST']._serialized_start=514
+  _globals['_TRANSLATORREQUEST']._serialized_end=825
+  _globals['_TRANSLATETURN']._serialized_start=827
+  _globals['_TRANSLATETURN']._serialized_end=909
+  _globals['_CONDENSETURNS']._serialized_start=911
+  _globals['_CONDENSETURNS']._serialized_end=988
+  _globals['_SUMMARIZECONTEXT']._serialized_start=990
+  _globals['_SUMMARIZECONTEXT']._serialized_end=1008
+  _globals['_GLOSSARYUPDATE']._serialized_start=1010
+  _globals['_GLOSSARYUPDATE']._serialized_end=1075
+  _globals['_ENDSESSION']._serialized_start=1077
+  _globals['_ENDSESSION']._serialized_end=1089
+  _globals['_TRANSLATORRESPONSE']._serialized_start=1091
+  _globals['_TRANSLATORRESPONSE']._serialized_end=1168
 # @@protoc_insertion_point(module_scope)

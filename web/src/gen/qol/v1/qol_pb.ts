@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file qol/v1/qol.proto.
  */
 export const file_qol_v1_qol: GenFile = /*@__PURE__*/
-  fileDesc("ChBxb2wvdjEvcW9sLnByb3RvEgZxb2wudjEiLQoJTWVkaWFTcGFuEhAKCHN0YXJ0X25zGAEgASgDEg4KBmVuZF9ucxgCIAEoAyLtAQoFRXZlbnQSEAoIZXZlbnRfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIPCgdjaGFubmVsGAMgASgJEgwKBHR5cGUYBCABKAkSEAoIc2VxdWVuY2UYBSABKAQSHwoEc3BhbhgGIAEoCzIRLnFvbC52MS5NZWRpYVNwYW4SGAoQcGFyZW50X2V2ZW50X2lkcxgHIAMoCRIvCgtwcm9kdWNlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEAoIZW5jb2RpbmcYCSABKAkSDwoHcGF5bG9hZBgKIAEoDCJqCglQY21Gb3JtYXQSFgoOc2FtcGxlX3JhdGVfaHoYASABKA0SFQoNY2hhbm5lbF9jb3VudBgCIAEoDRIuCg1zYW1wbGVfZm9ybWF0GAMgASgOMhcucW9sLnYxLlBjbVNhbXBsZUZvcm1hdCI/CgxBdWRpb1BheWxvYWQSIQoGZm9ybWF0GAEgASgLMhEucW9sLnYxLlBjbUZvcm1hdBIMCgRkYXRhGAIgASgMIooBCgtUZXh0UGF5bG9hZBIMCgR0ZXh0GAEgASgJEg0KBWZpbmFsGAIgASgIEhAKCGxhbmd1YWdlGAMgASgJEg8KB3NwZWFrZXIYBCABKAkSEgoKY29uZmlkZW5jZRgFIAEoAhInCgdwcm9zb2R5GAYgASgLMhYucW9sLnYxLlByb3NvZHlQYXlsb2FkIuEDCg5Qcm9zb2R5UGF5bG9hZBIQCghwaXRjaF9oehgBIAEoAhIOCgZlbmVyZ3kYAiABKAISDAoEcmF0ZRgDIAEoAhIQCghlbXBoYXNpcxgEIAEoAhIdChVwaXRjaF9yYW5nZV9zZW1pdG9uZXMYBSABKAISIAoYcmVsYXRpdmVfcGl0Y2hfc2VtaXRvbmVzGAYgASgCEhoKEnJlbGF0aXZlX2VuZXJneV9kYhgHIAEoAhIVCg1yZWxhdGl2ZV9yYXRlGAggASgCEg8KB2Fyb3VzYWwYCSABKAISFwoPcGF1c2VfYmVmb3JlX21zGAogASgNEhQKDHZvaWNlZF9yYXRpbxgLIAEoAhIWCg5zcGVlY2hfc2Vjb25kcxgMIAEoAhIPCgdlbW90aW9uGA0gASgJEhoKEmVtb3Rpb25fY29uZmlkZW5jZRgOIAEoAhIPCgdtYXJrZXJzGA8gAygJEiYKHnJlbGF0aXZlX3BpdGNoX3JhbmdlX3NlbWl0b25lcxgQIAEoAhIsCg5lbW90aW9uX3Njb3JlcxgRIAMoCzIULnFvbC52MS5FbW90aW9uU2NvcmUSLQoPcmVmZXJlbmNlX2F1ZGlvGBIgASgLMhQucW9sLnYxLkF1ZGlvUGF5bG9hZCIsCgxFbW90aW9uU2NvcmUSDQoFbGFiZWwYASABKAkSDQoFc2NvcmUYAiABKAIiMAoOU3BlYWtlclBheWxvYWQSCgoCaWQYASABKAkSEgoKY29uZmlkZW5jZRgCIAEoAiKMAQoSVHJhbnNsYXRpb25QYXlsb2FkEgwKBHRleHQYASABKAkSFwoPc291cmNlX2xhbmd1YWdlGAIgASgJEhcKD3RhcmdldF9sYW5ndWFnZRgDIAEoCRINCgVmaW5hbBgEIAEoCBInCgdwcm9zb2R5GAUgASgLMhYucW9sLnYxLlByb3NvZHlQYXlsb2FkIkoKElN0b3JlZEF1ZGlvUGF5bG9hZBISCgptZWRpYV90eXBlGAEgASgJEgwKBHBhdGgYAiABKAkSEgoKc2l6ZV9ieXRlcxgDIAEoBCJbChJBdWRpb1N0cmVhbVBheWxvYWQSEgoKbWVkaWFfdHlwZRgBIAEoCRIMCgRuYW1lGAIgASgJEhUKDWVuZF9vZl9zdHJlYW0YAyABKAgSDAoEZGF0YRgEIAEoDCIyCgxMb2dpblJlcXVlc3QSEAoIdXNlcm5hbWUYASABKAkSEAoIcGFzc3dvcmQYAiABKAkiKwoNTG9naW5SZXNwb25zZRIaCgR1c2VyGAEgASgLMgwucW9sLnYxLlVzZXIiFAoSQ3VycmVudFVzZXJSZXF1ZXN0IjEKE0N1cnJlbnRVc2VyUmVzcG9uc2USGgoEdXNlchgBIAEoCzIMLnFvbC52MS5Vc2VyIicKBFVzZXISEAoIdXNlcm5hbWUYASABKAkSDQoFYWRtaW4YAiABKAgiGwoZQ3JlYXRlVXBsb2FkVGlja2V0UmVxdWVzdCJFChpDcmVhdGVVcGxvYWRUaWNrZXRSZXNwb25zZRIOCgZ0aWNrZXQYASABKAkSFwoPZXhwaXJlc19hdF91bml4GAIgASgDIhYKFFRvcGljQWN0aXZpdHlSZXF1ZXN0IjUKDVRvcGljQWN0aXZpdHkSDwoHc3ViamVjdBgBIAEoCRITCgtldmVudF9jb3VudBgCIAEoBCJeChVUb3BpY0FjdGl2aXR5UmVzcG9uc2USJQoGdG9waWNzGAEgAygLMhUucW9sLnYxLlRvcGljQWN0aXZpdHkSHgoWb2JzZXJ2ZWRfYXRfdW5peF9taWxsaRgCIAEoAyJDCgtTdGFydFVwbG9hZBIMCgRuYW1lGAEgASgJEhIKCnNpemVfYnl0ZXMYAiABKAQSEgoKbWVkaWFfdHlwZRgDIAEoCSJDCgpBdWRpb0NodW5rEhAKCHNlcXVlbmNlGAEgASgEEgwKBGRhdGEYAiABKAwSFQoNZW5kX29mX3N0cmVhbRgDIAEoCCIOCgxDYW5jZWxVcGxvYWQinAEKC0NsaWVudEZyYW1lEisKDHN0YXJ0X3VwbG9hZBgBIAEoCzITLnFvbC52MS5TdGFydFVwbG9hZEgAEikKC2F1ZGlvX2NodW5rGAIgASgLMhIucW9sLnYxLkF1ZGlvQ2h1bmtIABItCg1jYW5jZWxfdXBsb2FkGAMgASgLMhQucW9sLnYxLkNhbmNlbFVwbG9hZEgAQgYKBGJvZHkiJAoOVXBsb2FkQWNjZXB0ZWQSEgoKc2Vzc2lvbl9pZBgBIAEoCSJgCg9VcGxvYWRDb21wbGV0ZWQSEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZzdGF0dXMYAiABKAkSEwoLb3V0cHV0X3BhdGgYAyABKAkSFAoMb3V0cHV0X3BhdGhzGAQgAygJIiYKBUVycm9yEgwKBGNvZGUYASABKAkSDwoHbWVzc2FnZRgCIAEoCSKdAQoLU2VydmVyRnJhbWUSMQoPdXBsb2FkX2FjY2VwdGVkGAEgASgLMhYucW9sLnYxLlVwbG9hZEFjY2VwdGVkSAASMwoQdXBsb2FkX2NvbXBsZXRlZBgCIAEoCzIXLnFvbC52MS5VcGxvYWRDb21wbGV0ZWRIABIeCgVlcnJvchgDIAEoCzINLnFvbC52MS5FcnJvckgAQgYKBGJvZHkidAoKVXNlclJlY29yZBIQCgh1c2VybmFtZRgBIAEoCRINCgVhZG1pbhgCIAEoCBIVCg1wYXNzd29yZF9zYWx0GAMgASgMEhUKDXBhc3N3b3JkX2hhc2gYBCABKAwSFwoPY3JlYXRlZF9hdF91bml4GAUgASgDIjoKDVNlc3Npb25SZWNvcmQSEAoIdXNlcm5hbWUYASABKAkSFwoPZXhwaXJlc19hdF91bml4GAIgASgDIj8KElVwbG9hZFRpY2tldFJlY29yZBIQCgh1c2VybmFtZRgBIAEoCRIXCg9leHBpcmVzX2F0X3VuaXgYAiABKAMqcAoPUGNtU2FtcGxlRm9ybWF0EiEKHVBDTV9TQU1QTEVfRk9STUFUX1VOU1BFQ0lGSUVEEAASHAoYUENNX1NBTVBMRV9GT1JNQVRfUzE2X0xFEAESHAoYUENNX1NBTVBMRV9GT1JNQVRfRjMyX0xFEAJCLFoqZ2l0aHViLmNvbS9hbGVrc2NsYXJrL3FvbC9nZW4vcW9sL3YxO3FvbHYxYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("ChBxb2wvdjEvcW9sLnByb3RvEgZxb2wudjEiLQoJTWVkaWFTcGFuEhAKCHN0YXJ0X25zGAEgASgDEg4KBmVuZF9ucxgCIAEoAyLtAQoFRXZlbnQSEAoIZXZlbnRfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIPCgdjaGFubmVsGAMgASgJEgwKBHR5cGUYBCABKAkSEAoIc2VxdWVuY2UYBSABKAQSHwoEc3BhbhgGIAEoCzIRLnFvbC52MS5NZWRpYVNwYW4SGAoQcGFyZW50X2V2ZW50X2lkcxgHIAMoCRIvCgtwcm9kdWNlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEAoIZW5jb2RpbmcYCSABKAkSDwoHcGF5bG9hZBgKIAEoDCJqCglQY21Gb3JtYXQSFgoOc2FtcGxlX3JhdGVfaHoYASABKA0SFQoNY2hhbm5lbF9jb3VudBgCIAEoDRIuCg1zYW1wbGVfZm9ybWF0GAMgASgOMhcucW9sLnYxLlBjbVNhbXBsZUZvcm1hdCI/CgxBdWRpb1BheWxvYWQSIQoGZm9ybWF0GAEgASgLMhEucW9sLnYxLlBjbUZvcm1hdBIMCgRkYXRhGAIgASgMIooBCgtUZXh0UGF5bG9hZBIMCgR0ZXh0GAEgASgJEg0KBWZpbmFsGAIgASgIEhAKCGxhbmd1YWdlGAMgASgJEg8KB3NwZWFrZXIYBCABKAkSEgoKY29uZmlkZW5jZRgFIAEoAhInCgdwcm9zb2R5GAYgASgLMhYucW9sLnYxLlByb3NvZHlQYXlsb2FkIuEDCg5Qcm9zb2R5UGF5bG9hZBIQCghwaXRjaF9oehgBIAEoAhIOCgZlbmVyZ3kYAiABKAISDAoEcmF0ZRgDIAEoAhIQCghlbXBoYXNpcxgEIAEoAhIdChVwaXRjaF9yYW5nZV9zZW1pdG9uZXMYBSABKAISIAoYcmVsYXRpdmVfcGl0Y2hfc2VtaXRvbmVzGAYgASgCEhoKEnJlbGF0aXZlX2VuZXJneV9kYhgHIAEoAhIVCg1yZWxhdGl2ZV9yYXRlGAggASgCEg8KB2Fyb3VzYWwYCSABKAISFwoPcGF1c2VfYmVmb3JlX21zGAogASgNEhQKDHZvaWNlZF9yYXRpbxgLIAEoAhIWCg5zcGVlY2hfc2Vjb25kcxgMIAEoAhIPCgdlbW90aW9uGA0gASgJEhoKEmVtb3Rpb25fY29uZmlkZW5jZRgOIAEoAhIPCgdtYXJrZXJzGA8gAygJEiYKHnJlbGF0aXZlX3BpdGNoX3JhbmdlX3NlbWl0b25lcxgQIAEoAhIsCg5lbW90aW9uX3Njb3JlcxgRIAMoCzIULnFvbC52MS5FbW90aW9uU2NvcmUSLQoPcmVmZXJlbmNlX2F1ZGlvGBIgASgLMhQucW9sLnYxLkF1ZGlvUGF5bG9hZCIsCgxFbW90aW9uU2NvcmUSDQoFbGFiZWwYASABKAkSDQoFc2NvcmUYAiABKAIiMAoOU3BlYWtlclBheWxvYWQSCgoCaWQYASABKAkSEgoKY29uZmlkZW5jZRgCIAEoAiKeAQoSVHJhbnNsYXRpb25QYXlsb2FkEgwKBHRleHQYASABKAkSFwoPc291cmNlX2xhbmd1YWdlGAIgASgJEhcKD3RhcmdldF9sYW5ndWFnZRgDIAEoCRINCgVmaW5hbBgEIAEoCBInCgdwcm9zb2R5GAUgASgLMhYucW9sLnYxLlByb3NvZHlQYXlsb2FkEhAKCHJlcGxhY2VzGAYgAygEIqwBCg5Db250cm9sUGF5bG9hZBItCghjb25kZW5zZRgBIAEoCzIZLnFvbC52MS5Db25kZW5zZURpcmVjdGl2ZUgAEi8KCXN1bW1hcml6ZRgCIAEoCzIaLnFvbC52MS5TdW1tYXJpemVEaXJlY3RpdmVIABItCghnbG9zc2FyeRgDIAEoCzIZLnFvbC52MS5HbG9zc2FyeURpcmVjdGl2ZUgAQgsKCWRpcmVjdGl2ZSJDChFDb25kZW5zZURpcmVjdGl2ZRIYChB0YXJnZXRfc2VxdWVuY2VzGAEgAygEEhQKDHRhcmdldF9yYXRpbxgCIAEoAiIUChJTdW1tYXJpemVEaXJlY3RpdmUiOwoRR2xvc3NhcnlEaXJlY3RpdmUSJgoHZW50cmllcxgBIAMoCzIVLnFvbC52MS5HbG9zc2FyeUVudHJ5Ii8KDUdsb3NzYXJ5RW50cnkSDgoGc291cmNlGAEgASgJEg4KBnRhcmdldBgCIAEoCSLYAQoQVGVsZW1ldHJ5UGF5bG9hZBINCgVzdGFnZRgBIAEoCRIbChNjb25zdW1lZF90aHJvdWdoX25zGAIgASgDEhgKEG91dHB1dF9jdXJzb3JfbnMYAyABKAMSFwoPYmFja2xvZ19zZWNvbmRzGAQgASgBEhgKEHF1ZXVlZF9zZXF1ZW5jZXMYBSADKAQSHQoVcHJvamVjdGVkX2xhZ19zZWNvbmRzGAYgASgBEhUKDXByb2Nlc3NpbmdfbXMYByABKAESFQoNY29udGV4dF90dXJucxgIIAEoDSJKChJTdG9yZWRBdWRpb1BheWxvYWQSEgoKbWVkaWFfdHlwZRgBIAEoCRIMCgRwYXRoGAIgASgJEhIKCnNpemVfYnl0ZXMYAyABKAQiWwoSQXVkaW9TdHJlYW1QYXlsb2FkEhIKCm1lZGlhX3R5cGUYASABKAkSDAoEbmFtZRgCIAEoCRIVCg1lbmRfb2Zfc3RyZWFtGAMgASgIEgwKBGRhdGEYBCABKAwiMgoMTG9naW5SZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhAKCHBhc3N3b3JkGAIgASgJIisKDUxvZ2luUmVzcG9uc2USGgoEdXNlchgBIAEoCzIMLnFvbC52MS5Vc2VyIhQKEkN1cnJlbnRVc2VyUmVxdWVzdCIxChNDdXJyZW50VXNlclJlc3BvbnNlEhoKBHVzZXIYASABKAsyDC5xb2wudjEuVXNlciInCgRVc2VyEhAKCHVzZXJuYW1lGAEgASgJEg0KBWFkbWluGAIgASgIIhsKGUNyZWF0ZVVwbG9hZFRpY2tldFJlcXVlc3QiRQoaQ3JlYXRlVXBsb2FkVGlja2V0UmVzcG9uc2USDgoGdGlja2V0GAEgASgJEhcKD2V4cGlyZXNfYXRfdW5peBgCIAEoAyIWChRUb3BpY0FjdGl2aXR5UmVxdWVzdCI1Cg1Ub3BpY0FjdGl2aXR5Eg8KB3N1YmplY3QYASABKAkSEwoLZXZlbnRfY291bnQYAiABKAQiXgoVVG9waWNBY3Rpdml0eVJlc3BvbnNlEiUKBnRvcGljcxgBIAMoCzIVLnFvbC52MS5Ub3BpY0FjdGl2aXR5Eh4KFm9ic2VydmVkX2F0X3VuaXhfbWlsbGkYAiABKAMiQwoLU3RhcnRVcGxvYWQSDAoEbmFtZRgBIAEoCRISCgpzaXplX2J5dGVzGAIgASgEEhIKCm1lZGlhX3R5cGUYAyABKAkiQwoKQXVkaW9DaHVuaxIQCghzZXF1ZW5jZRgBIAEoBBIMCgRkYXRhGAIgASgMEhUKDWVuZF9vZl9zdHJlYW0YAyABKAgiDgoMQ2FuY2VsVXBsb2FkIpwBCgtDbGllbnRGcmFtZRIrCgxzdGFydF91cGxvYWQYASABKAsyEy5xb2wudjEuU3RhcnRVcGxvYWRIABIpCgthdWRpb19jaHVuaxgCIAEoCzISLnFvbC52MS5BdWRpb0NodW5rSAASLQoNY2FuY2VsX3VwbG9hZBgDIAEoCzIULnFvbC52MS5DYW5jZWxVcGxvYWRIAEIGCgRib2R5IiQKDlVwbG9hZEFjY2VwdGVkEhIKCnNlc3Npb25faWQYASABKAkiYAoPVXBsb2FkQ29tcGxldGVkEhIKCnNlc3Npb25faWQYASABKAkSDgoGc3RhdHVzGAIgASgJEhMKC291dHB1dF9wYXRoGAMgASgJEhQKDG91dHB1dF9wYXRocxgEIAMoCSImCgVFcnJvchIMCgRjb2RlGAEgASgJEg8KB21lc3NhZ2UYAiABKAkinQEKC1NlcnZlckZyYW1lEjEKD3VwbG9hZF9hY2NlcHRlZBgBIAEoCzIWLnFvbC52MS5VcGxvYWRBY2NlcHRlZEgAEjMKEHVwbG9hZF9jb21wbGV0ZWQYAiABKAsyFy5xb2wudjEuVXBsb2FkQ29tcGxldGVkSAASHgoFZXJyb3IYAyABKAsyDS5xb2wudjEuRXJyb3JIAEIGCgRib2R5InQKClVzZXJSZWNvcmQSEAoIdXNlcm5hbWUYASABKAkSDQoFYWRtaW4YAiABKAgSFQoNcGFzc3dvcmRfc2FsdBgDIAEoDBIVCg1wYXNzd29yZF9oYXNoGAQgASgMEhcKD2NyZWF0ZWRfYXRfdW5peBgFIAEoAyI6Cg1TZXNzaW9uUmVjb3JkEhAKCHVzZXJuYW1lGAEgASgJEhcKD2V4cGlyZXNfYXRfdW5peBgCIAEoAyI/ChJVcGxvYWRUaWNrZXRSZWNvcmQSEAoIdXNlcm5hbWUYASABKAkSFwoPZXhwaXJlc19hdF91bml4GAIgASgDKnAKD1BjbVNhbXBsZUZvcm1hdBIhCh1QQ01fU0FNUExFX0ZPUk1BVF9VTlNQRUNJRklFRBAAEhwKGFBDTV9TQU1QTEVfRk9STUFUX1MxNl9MRRABEhwKGFBDTV9TQU1QTEVfRk9STUFUX0YzMl9MRRACQixaKmdpdGh1Yi5jb20vYWxla3NjbGFyay9xb2wvZ2VuL3FvbC92MTtxb2x2MWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message qol.v1.MediaSpan
@@ -363,6 +363,11 @@ export type TranslationPayload = Message<"qol.v1.TranslationPayload"> & {
    * @generated from field: qol.v1.ProsodyPayload prosody = 5;
    */
   prosody?: ProsodyPayload;
+
+  /**
+   * @generated from field: repeated uint64 replaces = 6;
+   */
+  replaces: bigint[];
 };
 
 /**
@@ -371,6 +376,167 @@ export type TranslationPayload = Message<"qol.v1.TranslationPayload"> & {
  */
 export const TranslationPayloadSchema: GenMessage<TranslationPayload> = /*@__PURE__*/
   messageDesc(file_qol_v1_qol, 8);
+
+/**
+ * @generated from message qol.v1.ControlPayload
+ */
+export type ControlPayload = Message<"qol.v1.ControlPayload"> & {
+  /**
+   * @generated from oneof qol.v1.ControlPayload.directive
+   */
+  directive: {
+    /**
+     * @generated from field: qol.v1.CondenseDirective condense = 1;
+     */
+    value: CondenseDirective;
+    case: "condense";
+  } | {
+    /**
+     * @generated from field: qol.v1.SummarizeDirective summarize = 2;
+     */
+    value: SummarizeDirective;
+    case: "summarize";
+  } | {
+    /**
+     * @generated from field: qol.v1.GlossaryDirective glossary = 3;
+     */
+    value: GlossaryDirective;
+    case: "glossary";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message qol.v1.ControlPayload.
+ * Use `create(ControlPayloadSchema)` to create a new message.
+ */
+export const ControlPayloadSchema: GenMessage<ControlPayload> = /*@__PURE__*/
+  messageDesc(file_qol_v1_qol, 9);
+
+/**
+ * @generated from message qol.v1.CondenseDirective
+ */
+export type CondenseDirective = Message<"qol.v1.CondenseDirective"> & {
+  /**
+   * @generated from field: repeated uint64 target_sequences = 1;
+   */
+  targetSequences: bigint[];
+
+  /**
+   * @generated from field: float target_ratio = 2;
+   */
+  targetRatio: number;
+};
+
+/**
+ * Describes the message qol.v1.CondenseDirective.
+ * Use `create(CondenseDirectiveSchema)` to create a new message.
+ */
+export const CondenseDirectiveSchema: GenMessage<CondenseDirective> = /*@__PURE__*/
+  messageDesc(file_qol_v1_qol, 10);
+
+/**
+ * @generated from message qol.v1.SummarizeDirective
+ */
+export type SummarizeDirective = Message<"qol.v1.SummarizeDirective"> & {
+};
+
+/**
+ * Describes the message qol.v1.SummarizeDirective.
+ * Use `create(SummarizeDirectiveSchema)` to create a new message.
+ */
+export const SummarizeDirectiveSchema: GenMessage<SummarizeDirective> = /*@__PURE__*/
+  messageDesc(file_qol_v1_qol, 11);
+
+/**
+ * @generated from message qol.v1.GlossaryDirective
+ */
+export type GlossaryDirective = Message<"qol.v1.GlossaryDirective"> & {
+  /**
+   * @generated from field: repeated qol.v1.GlossaryEntry entries = 1;
+   */
+  entries: GlossaryEntry[];
+};
+
+/**
+ * Describes the message qol.v1.GlossaryDirective.
+ * Use `create(GlossaryDirectiveSchema)` to create a new message.
+ */
+export const GlossaryDirectiveSchema: GenMessage<GlossaryDirective> = /*@__PURE__*/
+  messageDesc(file_qol_v1_qol, 12);
+
+/**
+ * @generated from message qol.v1.GlossaryEntry
+ */
+export type GlossaryEntry = Message<"qol.v1.GlossaryEntry"> & {
+  /**
+   * @generated from field: string source = 1;
+   */
+  source: string;
+
+  /**
+   * @generated from field: string target = 2;
+   */
+  target: string;
+};
+
+/**
+ * Describes the message qol.v1.GlossaryEntry.
+ * Use `create(GlossaryEntrySchema)` to create a new message.
+ */
+export const GlossaryEntrySchema: GenMessage<GlossaryEntry> = /*@__PURE__*/
+  messageDesc(file_qol_v1_qol, 13);
+
+/**
+ * @generated from message qol.v1.TelemetryPayload
+ */
+export type TelemetryPayload = Message<"qol.v1.TelemetryPayload"> & {
+  /**
+   * @generated from field: string stage = 1;
+   */
+  stage: string;
+
+  /**
+   * @generated from field: int64 consumed_through_ns = 2;
+   */
+  consumedThroughNs: bigint;
+
+  /**
+   * @generated from field: int64 output_cursor_ns = 3;
+   */
+  outputCursorNs: bigint;
+
+  /**
+   * @generated from field: double backlog_seconds = 4;
+   */
+  backlogSeconds: number;
+
+  /**
+   * @generated from field: repeated uint64 queued_sequences = 5;
+   */
+  queuedSequences: bigint[];
+
+  /**
+   * @generated from field: double projected_lag_seconds = 6;
+   */
+  projectedLagSeconds: number;
+
+  /**
+   * @generated from field: double processing_ms = 7;
+   */
+  processingMs: number;
+
+  /**
+   * @generated from field: uint32 context_turns = 8;
+   */
+  contextTurns: number;
+};
+
+/**
+ * Describes the message qol.v1.TelemetryPayload.
+ * Use `create(TelemetryPayloadSchema)` to create a new message.
+ */
+export const TelemetryPayloadSchema: GenMessage<TelemetryPayload> = /*@__PURE__*/
+  messageDesc(file_qol_v1_qol, 14);
 
 /**
  * @generated from message qol.v1.StoredAudioPayload
@@ -397,7 +563,7 @@ export type StoredAudioPayload = Message<"qol.v1.StoredAudioPayload"> & {
  * Use `create(StoredAudioPayloadSchema)` to create a new message.
  */
 export const StoredAudioPayloadSchema: GenMessage<StoredAudioPayload> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 9);
+  messageDesc(file_qol_v1_qol, 15);
 
 /**
  * @generated from message qol.v1.AudioStreamPayload
@@ -429,7 +595,7 @@ export type AudioStreamPayload = Message<"qol.v1.AudioStreamPayload"> & {
  * Use `create(AudioStreamPayloadSchema)` to create a new message.
  */
 export const AudioStreamPayloadSchema: GenMessage<AudioStreamPayload> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 10);
+  messageDesc(file_qol_v1_qol, 16);
 
 /**
  * @generated from message qol.v1.LoginRequest
@@ -451,7 +617,7 @@ export type LoginRequest = Message<"qol.v1.LoginRequest"> & {
  * Use `create(LoginRequestSchema)` to create a new message.
  */
 export const LoginRequestSchema: GenMessage<LoginRequest> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 11);
+  messageDesc(file_qol_v1_qol, 17);
 
 /**
  * @generated from message qol.v1.LoginResponse
@@ -468,7 +634,7 @@ export type LoginResponse = Message<"qol.v1.LoginResponse"> & {
  * Use `create(LoginResponseSchema)` to create a new message.
  */
 export const LoginResponseSchema: GenMessage<LoginResponse> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 12);
+  messageDesc(file_qol_v1_qol, 18);
 
 /**
  * @generated from message qol.v1.CurrentUserRequest
@@ -481,7 +647,7 @@ export type CurrentUserRequest = Message<"qol.v1.CurrentUserRequest"> & {
  * Use `create(CurrentUserRequestSchema)` to create a new message.
  */
 export const CurrentUserRequestSchema: GenMessage<CurrentUserRequest> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 13);
+  messageDesc(file_qol_v1_qol, 19);
 
 /**
  * @generated from message qol.v1.CurrentUserResponse
@@ -498,7 +664,7 @@ export type CurrentUserResponse = Message<"qol.v1.CurrentUserResponse"> & {
  * Use `create(CurrentUserResponseSchema)` to create a new message.
  */
 export const CurrentUserResponseSchema: GenMessage<CurrentUserResponse> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 14);
+  messageDesc(file_qol_v1_qol, 20);
 
 /**
  * @generated from message qol.v1.User
@@ -520,7 +686,7 @@ export type User = Message<"qol.v1.User"> & {
  * Use `create(UserSchema)` to create a new message.
  */
 export const UserSchema: GenMessage<User> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 15);
+  messageDesc(file_qol_v1_qol, 21);
 
 /**
  * @generated from message qol.v1.CreateUploadTicketRequest
@@ -533,7 +699,7 @@ export type CreateUploadTicketRequest = Message<"qol.v1.CreateUploadTicketReques
  * Use `create(CreateUploadTicketRequestSchema)` to create a new message.
  */
 export const CreateUploadTicketRequestSchema: GenMessage<CreateUploadTicketRequest> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 16);
+  messageDesc(file_qol_v1_qol, 22);
 
 /**
  * @generated from message qol.v1.CreateUploadTicketResponse
@@ -555,7 +721,7 @@ export type CreateUploadTicketResponse = Message<"qol.v1.CreateUploadTicketRespo
  * Use `create(CreateUploadTicketResponseSchema)` to create a new message.
  */
 export const CreateUploadTicketResponseSchema: GenMessage<CreateUploadTicketResponse> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 17);
+  messageDesc(file_qol_v1_qol, 23);
 
 /**
  * @generated from message qol.v1.TopicActivityRequest
@@ -568,7 +734,7 @@ export type TopicActivityRequest = Message<"qol.v1.TopicActivityRequest"> & {
  * Use `create(TopicActivityRequestSchema)` to create a new message.
  */
 export const TopicActivityRequestSchema: GenMessage<TopicActivityRequest> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 18);
+  messageDesc(file_qol_v1_qol, 24);
 
 /**
  * @generated from message qol.v1.TopicActivity
@@ -590,7 +756,7 @@ export type TopicActivity = Message<"qol.v1.TopicActivity"> & {
  * Use `create(TopicActivitySchema)` to create a new message.
  */
 export const TopicActivitySchema: GenMessage<TopicActivity> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 19);
+  messageDesc(file_qol_v1_qol, 25);
 
 /**
  * @generated from message qol.v1.TopicActivityResponse
@@ -612,7 +778,7 @@ export type TopicActivityResponse = Message<"qol.v1.TopicActivityResponse"> & {
  * Use `create(TopicActivityResponseSchema)` to create a new message.
  */
 export const TopicActivityResponseSchema: GenMessage<TopicActivityResponse> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 20);
+  messageDesc(file_qol_v1_qol, 26);
 
 /**
  * @generated from message qol.v1.StartUpload
@@ -639,7 +805,7 @@ export type StartUpload = Message<"qol.v1.StartUpload"> & {
  * Use `create(StartUploadSchema)` to create a new message.
  */
 export const StartUploadSchema: GenMessage<StartUpload> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 21);
+  messageDesc(file_qol_v1_qol, 27);
 
 /**
  * @generated from message qol.v1.AudioChunk
@@ -666,7 +832,7 @@ export type AudioChunk = Message<"qol.v1.AudioChunk"> & {
  * Use `create(AudioChunkSchema)` to create a new message.
  */
 export const AudioChunkSchema: GenMessage<AudioChunk> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 22);
+  messageDesc(file_qol_v1_qol, 28);
 
 /**
  * @generated from message qol.v1.CancelUpload
@@ -679,7 +845,7 @@ export type CancelUpload = Message<"qol.v1.CancelUpload"> & {
  * Use `create(CancelUploadSchema)` to create a new message.
  */
 export const CancelUploadSchema: GenMessage<CancelUpload> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 23);
+  messageDesc(file_qol_v1_qol, 29);
 
 /**
  * @generated from message qol.v1.ClientFrame
@@ -714,7 +880,7 @@ export type ClientFrame = Message<"qol.v1.ClientFrame"> & {
  * Use `create(ClientFrameSchema)` to create a new message.
  */
 export const ClientFrameSchema: GenMessage<ClientFrame> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 24);
+  messageDesc(file_qol_v1_qol, 30);
 
 /**
  * @generated from message qol.v1.UploadAccepted
@@ -731,7 +897,7 @@ export type UploadAccepted = Message<"qol.v1.UploadAccepted"> & {
  * Use `create(UploadAcceptedSchema)` to create a new message.
  */
 export const UploadAcceptedSchema: GenMessage<UploadAccepted> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 25);
+  messageDesc(file_qol_v1_qol, 31);
 
 /**
  * @generated from message qol.v1.UploadCompleted
@@ -763,7 +929,7 @@ export type UploadCompleted = Message<"qol.v1.UploadCompleted"> & {
  * Use `create(UploadCompletedSchema)` to create a new message.
  */
 export const UploadCompletedSchema: GenMessage<UploadCompleted> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 26);
+  messageDesc(file_qol_v1_qol, 32);
 
 /**
  * @generated from message qol.v1.Error
@@ -785,7 +951,7 @@ export type Error = Message<"qol.v1.Error"> & {
  * Use `create(ErrorSchema)` to create a new message.
  */
 export const ErrorSchema: GenMessage<Error> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 27);
+  messageDesc(file_qol_v1_qol, 33);
 
 /**
  * @generated from message qol.v1.ServerFrame
@@ -820,7 +986,7 @@ export type ServerFrame = Message<"qol.v1.ServerFrame"> & {
  * Use `create(ServerFrameSchema)` to create a new message.
  */
 export const ServerFrameSchema: GenMessage<ServerFrame> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 28);
+  messageDesc(file_qol_v1_qol, 34);
 
 /**
  * @generated from message qol.v1.UserRecord
@@ -857,7 +1023,7 @@ export type UserRecord = Message<"qol.v1.UserRecord"> & {
  * Use `create(UserRecordSchema)` to create a new message.
  */
 export const UserRecordSchema: GenMessage<UserRecord> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 29);
+  messageDesc(file_qol_v1_qol, 35);
 
 /**
  * @generated from message qol.v1.SessionRecord
@@ -879,7 +1045,7 @@ export type SessionRecord = Message<"qol.v1.SessionRecord"> & {
  * Use `create(SessionRecordSchema)` to create a new message.
  */
 export const SessionRecordSchema: GenMessage<SessionRecord> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 30);
+  messageDesc(file_qol_v1_qol, 36);
 
 /**
  * @generated from message qol.v1.UploadTicketRecord
@@ -901,7 +1067,7 @@ export type UploadTicketRecord = Message<"qol.v1.UploadTicketRecord"> & {
  * Use `create(UploadTicketRecordSchema)` to create a new message.
  */
 export const UploadTicketRecordSchema: GenMessage<UploadTicketRecord> = /*@__PURE__*/
-  messageDesc(file_qol_v1_qol, 31);
+  messageDesc(file_qol_v1_qol, 37);
 
 /**
  * @generated from enum qol.v1.PcmSampleFormat

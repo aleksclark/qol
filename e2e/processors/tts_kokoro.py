@@ -73,18 +73,13 @@ def main() -> None:
         gain = loudness_gain(prosody)
         pitch.configure(prosody)
         started = time.monotonic()
-        produced = 0
-        for result in pipeline(request.text, voice=voice, speed=speed):
-            if result.audio is None:
-                continue
-            audio = np.asarray(result.audio, dtype=np.float32) * gain
-            audio = resample_poly(audio, OUTPUT_SAMPLE_RATE // 150, KOKORO_SAMPLE_RATE // 150)
-            pcm = (np.clip(audio, -1.0, 1.0) * 32767.0).round().astype("<i2").tobytes()
-            produced += len(pcm)
-            write_pcm(output, pcm, end=False)
-        if produced == 0:
+        segments = [np.asarray(result.audio, dtype=np.float32) for result in pipeline(request.text, voice=voice, speed=speed) if result.audio is not None]
+        if not segments:
             raise RuntimeError("Kokoro produced no audio")
-        write_pcm(output, b"", end=True)
+        audio = resample_poly(np.concatenate(segments) * gain, OUTPUT_SAMPLE_RATE // 150, KOKORO_SAMPLE_RATE // 150)
+        pcm = (np.clip(audio, -1.0, 1.0) * 32767.0).round().astype("<i2").tobytes()
+        produced = len(pcm)
+        write_pcm(output, pcm, end=True)
         print(
             f"kokoro synthesized {produced / 2 / OUTPUT_SAMPLE_RATE:.2f}s in {time.monotonic() - started:.3f}s speed={speed:.2f} gain={gain:.2f} shift={pitch.shift:+.1f}st range={pitch.range_delta:+.1f}st",
             file=sys.stderr,

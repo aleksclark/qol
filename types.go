@@ -12,6 +12,8 @@ const (
 	ChannelTTSAudio          = "graph.record-es.input"
 	ChannelRecordENCompleted = "graph.record-en.completed"
 	ChannelRecordESCompleted = "graph.record-es.completed"
+	ChannelTranslateControl  = "graph.translate.control"
+	ChannelTelemetry         = "graph.telemetry"
 )
 
 const (
@@ -21,5 +23,7 @@ const (
 	TypeTextFinal        = "qol.text.final"
 	TypeTranslationFinal = "qol.translation.final"
 	TypeStoredAudio      = "qol.audio.stored"
+	TypeControl          = "qol.control"
+	TypeTelemetry        = "qol.telemetry"
 	EncodingProtobuf     = "application/protobuf"
 )

@@ -20,6 +20,7 @@ import (
 const (
 	ProsodySampleRate     = 16000
 	DefaultProsodyTimeout = 5 * time.Second
+	clockInterval         = 250 * time.Millisecond
 )
 
 type prosodySession struct {
@@ -32,6 +33,8 @@ type prosodySession struct {
 	changed   chan struct{}
 
 	textNext      uint64
+	telemetrySeq  uint64
+	reported      qol.MediaTime
 	textDone      bool
 	tracker       *prosody.Tracker
 	lastSpeechEnd qol.MediaTime
@@ -42,6 +45,7 @@ type ProsodyStage struct {
 	spec           qol.StageSpec
 	decoder        LiveProcessor
 	emotion        *persistentProcess
+	publisher      qol.Publisher
 	attachAudio    bool
 	referenceRate  float64
 	timeout        time.Duration
@@ -66,7 +70,7 @@ func NewProsody(decoder, emotion LiveProcessor, referenceRate float64, timeout t
 				{Name: "utterances", Channel: qol.ChannelUtterances, Types: []string{qol.TypeTextFinal}},
 				{Name: "audio", Channel: qol.ChannelProsodyAudio, Types: []string{qol.TypeAudioStream}},
 			},
-			Outputs: []qol.Port{{Name: "output", Channel: qol.ChannelASRText, Types: []string{qol.TypeTextFinal}}},
+			Outputs: []qol.Port{{Name: "output", Channel: qol.ChannelASRText, Types: []string{qol.TypeTextFinal}}, {Name: "clock", Channel: qol.ChannelTelemetry, Types: []string{qol.TypeTelemetry}}},
 		},
 		decoder: decoder, emotion: classifier, referenceRate: referenceRate, timeout: timeout, now: time.Now, sessions: make(map[string]*prosodySession),
 	}
@@ -82,7 +86,7 @@ func (s *ProsodyStage) Spec() qol.StageSpec {
 }
 
 func (s *ProsodyStage) Run(ctx context.Context, bus qol.Bus) error {
-	s.processContext = ctx
+	s.processContext, s.publisher = ctx, bus
 	if s.emotion != nil {
 		defer s.emotion.Close()
 	}
@@ -182,7 +186,12 @@ func (s *ProsodyStage) readPCM(sessionID string, session *prosodySession, output
 				session.samples = append(session.samples, int16(uint16(data[index])|uint16(data[index+1])<<8))
 			}
 			s.notify(session)
+			clock := qol.MediaTime((session.dropped + int64(len(session.samples))) * int64(time.Second) / ProsodySampleRate)
+			report := clock-session.reported >= qol.MediaTime(clockInterval)
 			s.mu.Unlock()
+			if report {
+				s.reportClock(sessionID, session, clock)
+			}
 			carry = append([]byte(nil), data[whole:]...)
 		}
 		if err != nil {
@@ -196,10 +205,44 @@ func (s *ProsodyStage) readPCM(sessionID string, session *prosodySession, output
 		slog.Warn("prosody decoder exited", "session", sessionID, "error", err)
 	}
 	s.mu.Lock()
+	clock := qol.MediaTime((session.dropped + int64(len(session.samples))) * int64(time.Second) / ProsodySampleRate)
+	s.mu.Unlock()
+	s.reportClock(sessionID, session, clock)
+	s.mu.Lock()
 	session.audioDone = true
 	s.notify(session)
 	s.release(sessionID, session)
 	s.mu.Unlock()
+}
+
+func (s *ProsodyStage) reportClock(sessionID string, session *prosodySession, clock qol.MediaTime) {
+	if s.publisher == nil {
+		return
+	}
+	payload, err := wire.MarshalTelemetry(qol.Telemetry{Stage: s.spec.Name, ConsumedThrough: clock})
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	sequence := session.telemetrySeq
+	session.telemetrySeq++
+	session.reported = clock
+	s.mu.Unlock()
+	ctx := s.processContext
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_ = s.publisher.Publish(ctx, qol.Event{
+		ID:         eventID(s.spec.Name+".clock", sessionID, sequence),
+		SessionID:  sessionID,
+		Channel:    qol.ChannelTelemetry,
+		Type:       qol.TypeTelemetry,
+		Seq:        sequence,
+		Span:       qol.Span{Start: clock, End: clock},
+		ProducedAt: s.now().UTC(),
+		Encoding:   qol.EncodingProtobuf,
+		Payload:    payload,
+	})
 }
 
 func (s *ProsodyStage) notify(session *prosodySession) {

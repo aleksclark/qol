@@ -29,3 +29,38 @@ message EmotionResult {
   float confidence = 2;
   repeated EmotionScore scores = 3;
 }
+
+message TranslatorRequest {
+  string session_id = 1;
+  oneof request {
+    TranslateTurn turn = 2;
+    CondenseTurns condense = 3;
+    SummarizeContext summarize = 4;
+    GlossaryUpdate glossary = 5;
+    EndSession end = 6;
+  }
+}
+
+message TranslateTurn {
+  uint64 turn_id = 1;
+  string text = 2;
+  bool final = 3;
+}
+
+message CondenseTurns {
+  repeated uint64 turn_ids = 1;
+  float target_ratio = 2;
+}
+
+message SummarizeContext {}
+
+message GlossaryUpdate {
+  repeated GlossaryEntry entries = 1;
+}
+
+message EndSession {}
+
+message TranslatorResponse {
+  string text = 1;
+  uint32 context_turns = 2;
+}

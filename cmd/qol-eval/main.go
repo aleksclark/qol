@@ -39,7 +39,14 @@ func newCommand() *cobra.Command {
 	carry.Flags().Float64("min-rate-correlation", -1, "Fail below this speaking-rate correlation; -1 disables")
 	carry.Flags().Float64("min-pitch-correlation", -1, "Fail below this pitch correlation; -1 disables")
 	carry.Flags().Bool("verbose", false, "Print one line per utterance")
-	command.AddCommand(carry)
+	continuity := &cobra.Command{
+		Use:   "continuity <audio-file>...",
+		Short: "Count hard onsets (silence to full level within 10 ms) in recorded speech",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  runContinuity,
+	}
+	continuity.Flags().String("ffmpeg", "ffmpeg", "ffmpeg executable used to decode audio")
+	command.AddCommand(carry, continuity)
 	return command
 }
 
@@ -134,4 +141,23 @@ func resample(ffmpeg string, samples []int16, sampleRate int) ([]byte, error) {
 		return nil, fmt.Errorf("resample: %w: %s", err, stderr.String())
 	}
 	return resampled, nil
+}
+
+func runContinuity(command *cobra.Command, paths []string) error {
+	settings, err := config.Bind(command)
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
+		decode := exec.Command(settings.GetString("ffmpeg"), "-v", "error", "-i", path, "-f", "s16le", "-ac", "1", "-ar", strconv.Itoa(worker.SynthesisSampleRate), "pipe:1")
+		var stderr bytes.Buffer
+		decode.Stderr = &stderr
+		pcm, err := decode.Output()
+		if err != nil {
+			return fmt.Errorf("decode %s: %w: %s", path, err, stderr.String())
+		}
+		result := evaluation.Discontinuities(evaluation.Samples(pcm), worker.SynthesisSampleRate)
+		fmt.Fprintf(command.OutOrStdout(), "%s: %.1fs, %d hard onsets (%.1f/min)\n", path, result.Seconds, result.AbruptOnsets, result.OnsetsPerMin)
+	}
+	return nil
 }

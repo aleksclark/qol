@@ -106,3 +106,33 @@ func TestFromGraphEventsTracksOutputPosition(t *testing.T) {
 		t.Fatalf("unexpected utterance: start=%s samples=%d", utterances[0].Start, len(utterances[0].Samples))
 	}
 }
+
+func TestDiscontinuitiesFindHardEdgesButNotFades(t *testing.T) {
+	hard := append(make([]int16, rate/2), tone(time.Second, 200, 0.5)...)
+	hard = append(hard, make([]int16, rate/2)...)
+	result := evaluation.Discontinuities(hard, rate)
+	if result.AbruptOnsets != 1 {
+		t.Fatalf("a hard onset must be found: %+v", result)
+	}
+	faded := tone(time.Second, 200, 0.5)
+	ramp := rate / 20
+	for index := range ramp {
+		faded[index] = int16(float64(faded[index]) * float64(index) / float64(ramp))
+		faded[len(faded)-1-index] = int16(float64(faded[len(faded)-1-index]) * float64(index) / float64(ramp))
+	}
+	smooth := append(append(make([]int16, rate/2), faded...), make([]int16, rate/2)...)
+	if result := evaluation.Discontinuities(smooth, rate); result.AbruptOnsets != 0 {
+		t.Fatalf("faded speech must be continuous: %+v", result)
+	}
+}
+
+func TestPhraseJoinsMeasureSilenceBetweenPhrases(t *testing.T) {
+	phrase := func(lead, trail time.Duration) evaluation.Utterance {
+		samples := append(make([]int16, int(lead.Seconds()*rate)), tone(200*time.Millisecond, 200, 0.3)...)
+		return evaluation.Utterance{Samples: append(samples, make([]int16, int(trail.Seconds()*rate))...), SampleRate: rate}
+	}
+	joins := evaluation.PhraseJoins([]evaluation.Utterance{phrase(0, 20*time.Millisecond), phrase(10*time.Millisecond, 0), {SampleRate: rate}, phrase(300*time.Millisecond, 0)}, 80*time.Millisecond)
+	if joins.Count != 2 || joins.Tight != 1 || joins.MinimumGap < 25*time.Millisecond || joins.MinimumGap > 35*time.Millisecond {
+		t.Fatalf("unexpected joins: %+v", joins)
+	}
+}
